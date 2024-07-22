@@ -129,6 +129,8 @@ public:
             const double& period = 0.001,
             const bool& use_mesh = true);
 
+  virtual bool reset() = 0;
+
 };
 
 // Com
@@ -144,6 +146,8 @@ public:
       const OpenSoT::AffineHelper& qddot,
       const double& period = 0.001);
 
+  virtual bool reset() = 0;
+
 };
 
 // AngularMomentum
@@ -158,6 +162,8 @@ public:
                   XBot::ModelInterface& robot,
                   const OpenSoT::AffineHelper& qddot,
                   const double& period = 0.001);
+
+  virtual bool reset() = 0;
 
 };
 
@@ -175,6 +181,8 @@ public:
            const std::string& task_id = "postural",
            const double& period = 0.001);
 
+  virtual bool reset() = 0;
+
 };
 
 // Wrench
@@ -191,6 +199,8 @@ public:
          const std::string& base_link,
          OpenSoT::AffineHelper& wrench,
          const double& period = 0.001);
+
+  virtual bool reset() = 0;
 
 };
 

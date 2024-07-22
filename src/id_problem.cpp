@@ -8,6 +8,14 @@
 #include <wolf_wbid/id_problem.h>
 #include <OpenSoT/utils/Affine.h>
 
+#ifdef ROS
+  #include <wolf_wbid/task_ros_wrappers/cartesian.h>
+  #include <wolf_wbid/task_ros_wrappers/com.h>
+  #include <wolf_wbid/task_ros_wrappers/momentum.h>
+  #include <wolf_wbid/task_ros_wrappers/postural.h>
+  #include <wolf_wbid/task_ros_wrappers/wrench.h>
+#endif
+
 using namespace OpenSoT;
 
 namespace wolf_wbid {
@@ -52,8 +60,8 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   for(unsigned int i=0; i<foot_names_.size(); i++)
   {
 
-    feet_[foot_names_[i]] = std::make_shared<Cartesian>(nh,foot_names_[i], *model_, foot_names_[i],
-                                                        WORLD_FRAME_NAME, id_->getJointsAccelerationAffine());
+    feet_[foot_names_[i]] = std::make_shared<CartesianImpl>(robot_name,foot_names_[i], *model_, foot_names_[i],
+                                                            WORLD_FRAME_NAME, id_->getJointsAccelerationAffine(),dt);
     feet_[foot_names_[i]]->setLambda(0.,0.);
     feet_[foot_names_[i]]->setWeightIsDiagonalFlag(true);
     feet_[foot_names_[i]]->setGainType(OpenSoT::tasks::acceleration::GainType::Force);
@@ -64,8 +72,8 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   //   --------------------------
   for(unsigned int i=0; i<ee_names_.size(); i++)
   {
-    arms_[ee_names_[i]] = std::make_shared<Cartesian>(nh,ee_names_[i], *model_, ee_names_[i],
-                                                      model_->getBaseLinkName(), id_->getJointsAccelerationAffine());
+    arms_[ee_names_[i]] = std::make_shared<CartesianImpl>(robot_name,ee_names_[i], *model_, ee_names_[i],
+                                                          model_->getBaseLinkName(), id_->getJointsAccelerationAffine(),dt);
     arms_[ee_names_[i]]->setLambda(1.,1.);
     arms_[ee_names_[i]]->setWeightIsDiagonalFlag(true);
     arms_[ee_names_[i]]->setGainType(OpenSoT::tasks::acceleration::GainType::Acceleration);
@@ -76,8 +84,8 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   auto wrench = id_->getContactsWrenchAffine();
   for(unsigned int i=0; i<foot_names_.size(); i++)
   {
-    wrenches_[foot_names_[i]] = std::make_shared<Wrench>(nh,foot_names_[i]+"_wrench", foot_names_[i],
-                                                        WORLD_FRAME_NAME, wrench[i]);
+    wrenches_[foot_names_[i]] = std::make_shared<WrenchImpl>(robot_name,foot_names_[i]+"_wrench", foot_names_[i],
+                                                             WORLD_FRAME_NAME, wrench[i], dt);
     wrenches_[foot_names_[i]]->setLambda(1.);
     wrenches_[foot_names_[i]]->setWeightIsDiagonalFlag(true);
     wrenches_[foot_names_[i]]->OPTIONS.set_ext_lambda = true;
@@ -85,7 +93,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     wrenches_[foot_names_[i]]->registerReconfigurableVariables();
   }
   //   --------------------------
-  angular_momentum_ = std::make_shared<AngularMomentum>(nh,*model_,id_->getJointsAccelerationAffine());
+  angular_momentum_ = std::make_shared<AngularMomentumImpl>(robot_name,*model_,id_->getJointsAccelerationAffine(), dt);
   angular_momentum_->setLambda(0.);
   angular_momentum_->setWeightIsDiagonalFlag(true);
   angular_momentum_->setReference(Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero());
@@ -93,15 +101,15 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   angular_momentum_->loadParams();
   angular_momentum_->registerReconfigurableVariables();
   //   --------------------------
-  waist_ = std::make_shared<Cartesian>(nh,"waist", *model_, model_->getBaseLinkName(),
-                                          WORLD_FRAME_NAME, id_->getJointsAccelerationAffine());
+  waist_ = std::make_shared<CartesianImpl>(robot_name,"waist", *model_, model_->getBaseLinkName(),
+                                           WORLD_FRAME_NAME, id_->getJointsAccelerationAffine(), dt);
   waist_->setLambda(1.,1.);
   waist_->setWeightIsDiagonalFlag(true);
   waist_->setGainType(OpenSoT::tasks::acceleration::GainType::Force);
   waist_->loadParams();
   waist_->registerReconfigurableVariables();
   //   --------------------------
-  postural_ = std::make_shared<Postural>(nh,*model_, id_->getJointsAccelerationAffine());
+  postural_ = std::make_shared<PosturalImpl>(robot_name,*model_, id_->getJointsAccelerationAffine(), "postural", dt);
   postural_->setLambda(1.,1.);
   postural_->setWeightIsDiagonalFlag(true);
   postural_->setGainType(OpenSoT::tasks::acceleration::GainType::Force);
@@ -109,7 +117,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   postural_->registerReconfigurableVariables();
   postural_->setReference(model_->getStandUpJointPostion());
   //   --------------------------
-  com_ = std::make_shared<Com>(nh,*model_, id_->getJointsAccelerationAffine());
+  com_ = std::make_shared<ComImpl>(robot_name,*model_, id_->getJointsAccelerationAffine(), dt);
   com_->setLambda(1.,1.);
   com_->setWeightIsDiagonalFlag(true);
   com_->loadParams();
@@ -201,12 +209,12 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   if(activate_com_z_)
   {
       id_com.merge(id_Z);
-      FWHT(CLASS_NAME,"CoM z is active");
+      PRINT_INFO_NAMED(CLASS_NAME,"CoM z is active");
   }
   else
   {
       id_waist.merge(id_Z);
-      ROS_INFO_NAMED(CLASS_NAME,"CoM z is NOT active");
+      PRINT_INFO_NAMED(CLASS_NAME,"CoM z is NOT active");
   }
 
   wpg_stack_ /= (feet_aggregated + waist_%id_waist + com_%id_com);
@@ -217,19 +225,19 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   {
       wpg_stack_->getStack()[0] = angular_momentum_ + wpg_stack_->getStack()[0];
       mpc_stack_->getStack()[0] = angular_momentum_ + mpc_stack_->getStack()[0];
-      ROS_INFO_NAMED(CLASS_NAME,"angular momentum task is active");
+      PRINT_INFO_NAMED(CLASS_NAME,"angular momentum task is active");
   }
   else
-      ROS_INFO_NAMED(CLASS_NAME,"angular momentum task is NOT active");
+      PRINT_INFO_NAMED(CLASS_NAME,"angular momentum task is NOT active");
 
   if(activate_postural_)
   {
       wpg_stack_->getStack()[0] = postural_%id_limbs + wpg_stack_->getStack()[0];
       mpc_stack_->getStack()[0] = postural_%id_limbs + mpc_stack_->getStack()[0];
-      ROS_INFO_NAMED(CLASS_NAME,"postural task is active");
+      PRINT_INFO_NAMED(CLASS_NAME,"postural task is active");
   }
   else
-      ROS_INFO_NAMED(CLASS_NAME,"postural task is NOT active");
+      PRINT_INFO_NAMED(CLASS_NAME,"postural task is NOT active");
 
 
   if(ee_names_.size() > 0)
@@ -254,19 +262,19 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
       wpg_stack_->getStack()[0] = min_forces_weight_ * min_forces_[i] + wpg_stack_->getStack()[0];
       mpc_stack_->getStack()[0] = min_forces_weight_ * min_forces_[i] + mpc_stack_->getStack()[0];
     }
-    ROS_INFO_NAMED(CLASS_NAME,"force minimization tasks are active");
+    PRINT_INFO_NAMED(CLASS_NAME,"force minimization tasks are active");
   }
   else
-    ROS_INFO_NAMED(CLASS_NAME,"force minimization tasks are NOT active");
+    PRINT_INFO_NAMED(CLASS_NAME,"force minimization tasks are NOT active");
 
   if(min_qddot_weight_>0.0)
   {
     wpg_stack_->getStack()[0] = min_qddot_weight_ * min_qddot_ + wpg_stack_->getStack()[0];
     mpc_stack_->getStack()[0] = min_qddot_weight_ * min_qddot_ + mpc_stack_->getStack()[0];
-    ROS_INFO_NAMED(CLASS_NAME,"joint accelerations minimization task is active");
+    PRINT_INFO_NAMED(CLASS_NAME,"joint accelerations minimization task is active");
   }
   else
-    ROS_INFO_NAMED(CLASS_NAME,"joint accelerations minimization task is NOT active");
+    PRINT_INFO_NAMED(CLASS_NAME,"joint accelerations minimization task is NOT active");
 
   dynamics_task_ = std::make_shared<OpenSoT::tasks::acceleration::DynamicFeasibility>("dynamics", *model_,
                                                                                       id_->getJointsAccelerationAffine(),
@@ -281,10 +289,10 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   {
     wpg_stack_ << q_lims_%id_q_lims;
     mpc_stack_ << q_lims_%id_q_lims;
-    ROS_INFO_NAMED(CLASS_NAME,"joint position limits constraint is active");
+    PRINT_INFO_NAMED(CLASS_NAME,"joint position limits constraint is active");
   }
   else
-    ROS_INFO_NAMED(CLASS_NAME,"joint position limits constraint is NOT active");
+    PRINT_INFO_NAMED(CLASS_NAME,"joint position limits constraint is NOT active");
 
   // Regularization and first update
   Eigen::Index n = id_->getSerializer()->getSize();
@@ -325,7 +333,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   //,OpenSoT::solvers::wpg_solver_back_ends::qpSWIFT   );
   //,OpenSoT::solvers::wpg_solver_back_ends::proxQP    );
 
-  ROS_INFO_NAMED(CLASS_NAME,"Solver created");
+  PRINT_INFO_NAMED(CLASS_NAME,"Solver created");
 }
 
 void IDProblem::setFrictionConesMu(const double& mu)
@@ -387,7 +395,7 @@ void IDProblem::setRegularization(double regularization)
   if(regularization > 0.0 && regularization < 1.0)
     regularization_value_ = regularization;
   else
-    PRINT_WAR_NAMED(CLASS_NAME,"Regularization value has to be set between 0 and 1!");
+    PRINT_WARN_NAMED(CLASS_NAME,"Regularization value has to be set between 0 and 1!");
 }
 
 void IDProblem::setForcesMinimizationWeight(double weight)
@@ -395,7 +403,7 @@ void IDProblem::setForcesMinimizationWeight(double weight)
   if(weight>=0.0)
     min_forces_weight_ = weight;
   else
-    PRINT_WAR_NAMED(CLASS_NAME,"Weight value has to be greater equal than 0!");
+    PRINT_WARN_NAMED(CLASS_NAME,"Weight value has to be greater equal than 0!");
 }
 
 void IDProblem::setJointAccelerationMinimizationWeight(double weight)
@@ -403,7 +411,7 @@ void IDProblem::setJointAccelerationMinimizationWeight(double weight)
   if(weight>=0.0)
     min_qddot_weight_ = weight;
   else
-    PRINT_WAR_NAMED(CLASS_NAME,"Weight value has to be greater equal than 0!");
+    PRINT_WARN_NAMED(CLASS_NAME,"Weight value has to be greater equal than 0!");
 }
 
 void IDProblem::setFrictionConesR(const Eigen::Matrix3d& R)

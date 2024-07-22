@@ -110,3 +110,10 @@ void AngularMomentumImpl::publish()
 {
 
 }
+
+bool AngularMomentumImpl::reset()
+{
+  bool res = OpenSoT::tasks::acceleration::AngularMomentum::reset(); // Task's reset
+
+  return res;
+}

@@ -41,6 +41,8 @@ public:
 
   virtual void publish();
 
+  virtual bool reset() override;
+
 };
 
 } // namespace

@@ -17,8 +17,26 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 
 // WoLF
 #include <wolf_wbid/task_interface.h>
-#include <wolf_controller_utils/common.h>
 #include <wolf_wbid/quadruped_robot.h>
+#include <wolf_controller_utils/common.h>
+
+// OpenSoT
+#include <OpenSoT/tasks/GenericTask.h>
+#include <OpenSoT/tasks/acceleration/Postural.h>
+#include <OpenSoT/tasks/acceleration/Cartesian.h>
+#include <OpenSoT/tasks/acceleration/AngularMomentum.h>
+#include <OpenSoT/tasks/acceleration/CoM.h>
+#include <OpenSoT/tasks/acceleration/DynamicFeasibility.h>
+#include <OpenSoT/tasks/MinimizeVariable.h>
+#include <OpenSoT/constraints/GenericConstraint.h>
+#include <OpenSoT/constraints/acceleration/TorqueLimits.h>
+#include <OpenSoT/utils/AutoStack.h>
+#include <OpenSoT/solvers/iHQP.h>
+#include <OpenSoT/utils/InverseDynamics.h>
+#include <OpenSoT/constraints/force/FrictionCone.h>
+#include <OpenSoT/constraints/force/WrenchLimits.h>
+#include <OpenSoT/constraints/TaskToConstraint.h>
+#include <OpenSoT/constraints/acceleration/JointLimits.h>
 
 namespace wolf_wbid {
 
@@ -85,10 +103,8 @@ public:
 
     /**
      * @brief publish the ros topics related to the tasks
-     * @param ros current time
-     * @param ros current period
      */
-    void publish(const ros::Time& time, const ros::Duration& period);
+    void publish();
 
     /**
      * @brief set the postural reference and gains

@@ -40,6 +40,8 @@ public:
 
   virtual void publish();
 
+  virtual bool reset() override;
+
 private:
 
   virtual void _update(const Eigen::VectorXd& x) override;

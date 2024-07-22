@@ -35,7 +35,7 @@ public:
              const std::string& distal_link,
              const std::string& base_link,
              OpenSoT::AffineHelper& wrench,
-             const double& period);
+             const double& period = 0.001);
 
   virtual void registerReconfigurableVariables() override;
 

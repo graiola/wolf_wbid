@@ -99,6 +99,13 @@ void PosturalImpl::publish()
   }
 }
 
+bool PosturalImpl::reset()
+{
+  bool res = OpenSoT::tasks::acceleration::Postural::reset(); // Task's reset
+
+  return res;
+}
+
 void PosturalImpl::_update(const Eigen::VectorXd& x)
 {
   if(OPTIONS.set_ext_lambda)

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.0)
+cmake_minimum_required(VERSION 3.5)
 project(wolf_wbid)
 
 include(CheckCXXCompilerFlag)
@@ -19,17 +19,27 @@ else()
 endif()
 
 # ROS
-find_package(catkin REQUIRED roscpp tf tf_conversions realtime_tools rt_logger wolf_msgs wolf_controller_utils)
+find_package(catkin QUIET)
+find_package(ament_cmake QUIET)
+if(${catkin_FOUND})
+    find_package(catkin REQUIRED COMPONENTS tf realtime_tools rt_logger wolf_msgs wolf_controller_utils)
+    catkin_package(
+      INCLUDE_DIRS include
+      LIBRARIES quadruped_robot cartesian_trajectory id_problem task_wrappers
+      CATKIN_DEPENDS wolf_msgs wolf_controller_utils
+    )
+    add_definitions(-DROS)
+elseif(${ament_cmake_FOUND})
+    ament_export_include_directories(include)
+    ament_export_libraries(quadruped_robot cartesian_trajectory id_problem task_wrappers)
+    ament_package()
+    add_definitions(-DROS2)
+endif()
+
 # ADVR Packages
 find_package(OpenSoT REQUIRED)
 find_package(XBotInterface REQUIRED)
 find_package(ModelInterfaceRBDL REQUIRED)
-
-catkin_package(
-  INCLUDE_DIRS include
-  LIBRARIES quadruped_robot cartesian_trajectory id_problem task_wrappers
-  CATKIN_DEPENDS wolf_msgs wolf_controller_utils
-)
 
 include_directories(
     include
@@ -57,17 +67,12 @@ add_library(task_wrappers
     src/task_ros_wrappers/wrench.cpp)
 target_link_libraries(task_wrappers cartesian_trajectory ${catkin_LIBRARIES} ${OpenSoT_LIBRARIES} ${XBotInterface_LIBRARIES})
 
-#add_library(id_problem
-#    src/id_problem.cpp
-#    src/id_problem_ros.cpp)
-#target_link_libraries(id_problem quadruped_robot task_wrappers ${catkin_LIBRARIES} ${OpenSoT_LIBRARIES}
-#    ${XBotInterface_LIBRARIES} ${ModelInterfaceRBDL_LIBRARIES})
-
-add_executable(test_id_problem test/test_id_problem.cpp)
-target_link_libraries(test_id_problem quadruped_robot task_wrappers ${catkin_LIBRARIES} ${OpenSoT_LIBRARIES}
+add_library(id_problem
+    src/id_problem.cpp)
+target_link_libraries(id_problem quadruped_robot task_wrappers ${catkin_LIBRARIES} ${OpenSoT_LIBRARIES}
     ${XBotInterface_LIBRARIES} ${ModelInterfaceRBDL_LIBRARIES})
 
-install(TARGETS quadruped_robot cartesian_trajectory task_wrappers #id_problem
+install(TARGETS quadruped_robot cartesian_trajectory task_wrappers id_problem
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
