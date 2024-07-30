@@ -227,14 +227,6 @@ public:
      */
     void setJointAccelerationMinimizationWeight(double weight);
 
-protected:
-    /**
-     * @brief create the tasks
-     * @param robot_name
-     * @param dt
-     */
-    virtual void createTasks(const std::string& robot_name, const double& dt) = 0;
-
 private:
 
     bool _solve(const std::unique_ptr<OpenSoT::solvers::iHQP>& solver, Eigen::VectorXd& tau);
