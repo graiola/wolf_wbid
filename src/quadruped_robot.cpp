@@ -51,6 +51,8 @@ QuadrupedRobot::QuadrupedRobot(const std::string& robot_name, const std::string&
 
   dof_names_ = getEnabledJointNames();
 
+  robot_name_ = robot_name;
+
   for(unsigned int i=0;i<dof_names_.size();i++)
   {
     joint_idx_[dof_names_[i]] = i;
@@ -676,6 +678,11 @@ const double& QuadrupedRobot::getStandDownHeight()
 const std::string& QuadrupedRobot::getImuSensorName() const
 {
   return imu_name_;
+}
+
+const std::string& QuadrupedRobot::getRobotName() const
+{
+  return robot_name_;
 }
 
 const std::string& QuadrupedRobot::getRobotModelName() const
