@@ -55,8 +55,6 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   //
   // Here we create all the tasks
   //   --------------------------
-  createTasks(robot_name,dt);
-
   for(unsigned int i=0; i<foot_names_.size(); i++)
   {
 
@@ -615,6 +613,20 @@ void IDProblem::stanceWithFoot(const std::string &foot_name, const std::string& 
   feet_[foot_name]->setLambda(0.,0.);
   wrenches_lims_->getWrenchLimits(foot_name)->releaseContact(false);
   torque_lims_->enableContact(foot_name);
+}
+
+void IDProblem::publish()
+{
+
+  for (auto& tmp_map : feet_)
+    tmp_map.second->publish();
+  for (auto& tmp_map : arms_)
+    tmp_map.second->publish();
+  waist_->publish();
+  com_->publish();
+  postural_->publish();
+  angular_momentum_->publish();
+
 }
 
 void IDProblem::setWaistReference(const Eigen::Matrix3d& Rot, const double& z, const double& z_vel) // FIXME Give full position?

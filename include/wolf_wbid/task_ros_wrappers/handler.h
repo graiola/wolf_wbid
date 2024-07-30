@@ -36,7 +36,7 @@ public:
 
   TaskRosHandler(const std::string& task_name, const std::string& robot_name, const double& period);
 
-  virtual ~TaskRosHandler();
+  ~TaskRosHandler();
 
 protected:
 

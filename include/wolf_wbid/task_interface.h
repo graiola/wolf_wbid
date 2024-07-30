@@ -127,7 +127,9 @@ public:
             const std::string& base_link,
             const OpenSoT::AffineHelper& qddot,
             const double& period = 0.001,
-            const bool& use_mesh = true);
+            const bool& use_mesh = true)
+    :OpenSoT::tasks::acceleration::Cartesian(task_id,robot, distal_link,base_link,qddot)
+    ,TaskWrapperInterface(task_id,robot_name,period){}
 
   virtual bool reset() = 0;
 
@@ -144,7 +146,9 @@ public:
   Com(const std::string& robot_name,
       const XBot::ModelInterface& robot,
       const OpenSoT::AffineHelper& qddot,
-      const double& period = 0.001);
+      const double& period = 0.001)
+    :OpenSoT::tasks::acceleration::CoM(robot,qddot)
+    ,TaskWrapperInterface(_task_id,robot_name,period){}
 
   virtual bool reset() = 0;
 
@@ -161,7 +165,9 @@ public:
   AngularMomentum(const std::string& robot_name,
                   XBot::ModelInterface& robot,
                   const OpenSoT::AffineHelper& qddot,
-                  const double& period = 0.001);
+                  const double& period = 0.001)
+  :OpenSoT::tasks::acceleration::AngularMomentum(robot,qddot)
+  ,TaskWrapperInterface(_task_id,robot_name,period){}
 
   virtual bool reset() = 0;
 
@@ -179,7 +185,9 @@ public:
            const XBot::ModelInterface& robot,
            OpenSoT::AffineHelper qddot = OpenSoT::AffineHelper(),
            const std::string& task_id = "postural",
-           const double& period = 0.001);
+           const double& period = 0.001)
+  :OpenSoT::tasks::acceleration::Postural(robot,qddot,task_id)
+  ,TaskWrapperInterface(task_id,robot_name,period){}
 
   virtual bool reset() = 0;
 
@@ -198,7 +206,9 @@ public:
          const std::string& distal_link,
          const std::string& base_link,
          OpenSoT::AffineHelper& wrench,
-         const double& period = 0.001);
+         const double& period = 0.001)
+  :OpenSoT::tasks::force::Wrench(task_id,distal_link,base_link,wrench)
+  ,TaskWrapperInterface(task_id,robot_name,period){}
 
   virtual bool reset() = 0;
 

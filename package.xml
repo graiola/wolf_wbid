@@ -14,10 +14,12 @@
   <buildtool_depend condition="$ROS_VERSION == 1">catkin</buildtool_depend>
 
   <depend>tf</depend>
+  <depend>tf_conversions</depend>
   <depend>realtime_tools</depend>
   <depend>rt_logger</depend>
   <depend>wolf_msgs</depend>
   <depend>wolf_controller_utils</depend>
+  <depend>interactive_markers</depend>
 
   <export>
     <build_type condition="$ROS_VERSION == 2">ament_cmake</build_type>

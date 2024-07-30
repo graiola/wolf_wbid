@@ -18,15 +18,21 @@ else()
     message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 nor C++14 support. Please use a different C++ compiler.")
 endif()
 
+# ADVR Packages
+find_package(OpenSoT REQUIRED)
+find_package(XBotInterface REQUIRED)
+find_package(ModelInterfaceRBDL REQUIRED)
+
 # ROS
 find_package(catkin QUIET)
 find_package(ament_cmake QUIET)
 if(${catkin_FOUND})
-    find_package(catkin REQUIRED COMPONENTS tf realtime_tools rt_logger wolf_msgs wolf_controller_utils)
+    find_package(catkin REQUIRED COMPONENTS tf tf_conversions realtime_tools rt_logger wolf_msgs wolf_controller_utils interactive_markers)
     catkin_package(
       INCLUDE_DIRS include
       LIBRARIES quadruped_robot cartesian_trajectory id_problem task_wrappers
-      CATKIN_DEPENDS wolf_msgs wolf_controller_utils
+      CATKIN_DEPENDS wolf_msgs wolf_controller_utils interactive_markers
+      DEPENDS OpenSoT XBotInterface ModelInterfaceRBDL
     )
     add_definitions(-DROS)
 elseif(${ament_cmake_FOUND})
@@ -35,11 +41,6 @@ elseif(${ament_cmake_FOUND})
     ament_package()
     add_definitions(-DROS2)
 endif()
-
-# ADVR Packages
-find_package(OpenSoT REQUIRED)
-find_package(XBotInterface REQUIRED)
-find_package(ModelInterfaceRBDL REQUIRED)
 
 include_directories(
     include
@@ -51,7 +52,7 @@ include_directories(
 
 add_library(quadruped_robot
     src/quadruped_robot.cpp)
-target_link_libraries(quadruped_robot ${OpenSoT_LIBRARIES} ${XBotInterface_INCLUDE_DIRS} ${ModelInterfaceRBDL_INCLUDE_DIRS})
+target_link_libraries(quadruped_robot ${OpenSoT_LIBRARIES} ${XBotInterface_LIBRARIES} ${ModelInterfaceRBDL_LIBRARIES})
 
 add_library(cartesian_trajectory
     src/cartesian_trajectory.cpp)
@@ -65,7 +66,7 @@ add_library(task_wrappers
     src/task_ros_wrappers/momentum.cpp
     src/task_ros_wrappers/postural.cpp
     src/task_ros_wrappers/wrench.cpp)
-target_link_libraries(task_wrappers cartesian_trajectory ${catkin_LIBRARIES} ${OpenSoT_LIBRARIES} ${XBotInterface_LIBRARIES})
+target_link_libraries(task_wrappers cartesian_trajectory quadruped_robot ${catkin_LIBRARIES} ${OpenSoT_LIBRARIES} ${XBotInterface_LIBRARIES} ${ModelInterfaceRBDL_LIBRARIES})
 
 add_library(id_problem
     src/id_problem.cpp)
@@ -77,3 +78,6 @@ install(TARGETS quadruped_robot cartesian_trajectory task_wrappers id_problem
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+install(DIRECTORY include/${PROJECT_NAME}/
+        DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION})

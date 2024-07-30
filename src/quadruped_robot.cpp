@@ -183,10 +183,10 @@ QuadrupedRobot::QuadrupedRobot(const std::string& robot_name, const std::string&
 
   tau_max_.head(6).setZero();
 
-  ROS_INFO_STREAM_NAMED(CLASS_NAME,"Robot total mass is ["<<getMass()<<"]");
-  ROS_INFO_STREAM_NAMED(CLASS_NAME,"Joint position limits set to: min=["<<q_min_.transpose()<<"]"<< std::endl<<"max=["<<q_max_.transpose()<<"]");
-  ROS_INFO_STREAM_NAMED(CLASS_NAME,"Joint velocity limits set to: max=["<<qdot_max_.transpose()<<"]");
-  ROS_INFO_STREAM_NAMED(CLASS_NAME,"Joint effort limits set to: max=["<<tau_max_.transpose()<<"]");
+  PRINT_INFO_NAMED(CLASS_NAME,"Robot total mass is ["<<getMass()<<"]");
+  PRINT_INFO_NAMED(CLASS_NAME,"Joint position limits set to: min=["<<q_min_.transpose()<<"]"<< std::endl<<"max=["<<q_max_.transpose()<<"]");
+  PRINT_INFO_NAMED(CLASS_NAME,"Joint velocity limits set to: max=["<<qdot_max_.transpose()<<"]");
+  PRINT_INFO_NAMED(CLASS_NAME,"Joint effort limits set to: max=["<<tau_max_.transpose()<<"]");
 
   tmp_jacobian_.setZero(6, virtual_model_.dof_count);
 
@@ -208,7 +208,7 @@ QuadrupedRobot::QuadrupedRobot(const std::string& robot_name, const std::string&
   }
   stand_up_height_ =  -stand_up_height_/N_LEGS;
 
-  ROS_INFO_STREAM_NAMED(CLASS_NAME,"Robot stand-up height is ["<<stand_up_height_<<"]");
+  PRINT_INFO_NAMED(CLASS_NAME,"Robot stand-up height is ["<<stand_up_height_<<"]");
 
   stand_down_height_ = 0.0;
   for(unsigned int i=0;i<foot_names_.size();i++)
@@ -385,25 +385,23 @@ std::vector<bool> QuadrupedRobot::checkJointVelocities(Eigen::VectorXd &qdot)
 
 bool QuadrupedRobot::update(bool update_position, bool update_velocity, bool update_desired_acceleration)
 {
-  ROS_DEBUG_NAMED(CLASS_NAME,"update");
-
   // Internal update
   bool res = ModelInterface::update(update_position,update_velocity,update_desired_acceleration);
 
   // Update the transformations between world, base and horizontal frame
   getPose(base_name_,world_T_base_);
-  PRINT_INFO_NAMED(CLASS_NAME,"world_T_base.translation()" << world_T_base_.translation());
-  PRINT_INFO_NAMED(CLASS_NAME,"world_T_base.linear()" << world_T_base_.linear());
+  //PRINT_INFO_NAMED(CLASS_NAME,"world_T_base.translation()" << world_T_base_.translation());
+  //PRINT_INFO_NAMED(CLASS_NAME,"world_T_base.linear()" << world_T_base_.linear());
   world_R_hf_ = Eigen::Matrix3d::Identity();
   base_yaw_   = std::atan2(world_T_base_.linear()(1,0),world_T_base_.linear()(0,0));
   world_R_hf_ = Eigen::AngleAxisd(base_yaw_,Eigen::Vector3d::UnitZ());
-  PRINT_INFO_NAMED(CLASS_NAME,"yaw_base" << base_yaw_);
-  PRINT_INFO_NAMED(CLASS_NAME,"world_R_hf" << world_R_hf_);
+  //PRINT_INFO_NAMED(CLASS_NAME,"yaw_base" << base_yaw_);
+  //PRINT_INFO_NAMED(CLASS_NAME,"world_R_hf" << world_R_hf_);
   world_R_base_ = world_T_base_.linear();
   rotToRpy(world_R_base_,world_RPY_base_);
   hf_R_base_ = world_R_hf_.transpose() * world_R_base_;
-  PRINT_INFO_NAMED(CLASS_NAME,"world_R_base" << world_R_base_);
-  PRINT_INFO_NAMED(CLASS_NAME,"hf_R_base" << hf_R_base_);
+  //PRINT_INFO_NAMED(CLASS_NAME,"world_R_base" << world_R_base_);
+  //PRINT_INFO_NAMED(CLASS_NAME,"hf_R_base" << hf_R_base_);
 
   // Update the limb transformations
   for(unsigned int i=0; i<foot_names_.size(); i++)
