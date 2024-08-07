@@ -16,7 +16,6 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 #include <interactive_markers/interactive_marker_server.h>
 #include <realtime_tools/realtime_publisher.h>
 #include <realtime_tools/realtime_buffer.h>
-#include <eigen_conversions/eigen_msg.h>
 
 // STD
 #include <memory>
@@ -53,5 +52,5 @@ protected:
 
 } // namespace
 
-#endif // ROS_WRAPPERS_INTERFACE_H
+#endif // TASK_ROS_WRAPPERS_HANDLER_H
 

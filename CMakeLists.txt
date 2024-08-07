@@ -27,24 +27,36 @@ find_package(ModelInterfaceRBDL REQUIRED)
 find_package(catkin QUIET)
 find_package(ament_cmake QUIET)
 if(${catkin_FOUND})
-    find_package(catkin REQUIRED COMPONENTS tf tf_conversions realtime_tools rt_logger wolf_msgs wolf_controller_utils interactive_markers)
+    set(TASK_WRAPPERS_FOLDER "task_ros_wrappers")
     catkin_package(
       INCLUDE_DIRS include
       LIBRARIES quadruped_robot cartesian_trajectory id_problem task_wrappers
       CATKIN_DEPENDS wolf_msgs wolf_controller_utils interactive_markers
-      DEPENDS OpenSoT XBotInterface ModelInterfaceRBDL
     )
     add_definitions(-DROS)
+    message(STATUS "Add ROS definition")
 elseif(${ament_cmake_FOUND})
+    set(TASK_WRAPPERS_FOLDER "task_ros2_wrappers")
     ament_export_include_directories(include)
     ament_export_libraries(quadruped_robot cartesian_trajectory id_problem task_wrappers)
     ament_package()
     add_definitions(-DROS2)
+    message(STATUS "Add ROS2 definition")
 endif()
+
+find_package(tf2 REQUIRED)
+find_package(realtime_tools REQUIRED)
+find_package(wolf_msgs REQUIRED)
+find_package(wolf_controller_utils REQUIRED)
+find_package(interactive_markers REQUIRED)
 
 include_directories(
     include
-    ${catkin_INCLUDE_DIRS}
+    ${tf2_INCLUDE_DIRS}
+    ${realtime_tools_INCLUDE_DIRS}
+    ${wolf_msgs_INCLUDE_DIRS}
+    ${wolf_controller_utils_INCLUDE_DIRS}
+    ${interactive_markers_INCLUDE_DIRS}
     ${OpenSoT_INCLUDE_DIRS}
     ${XBotInterface_INCLUDE_DIRS}
     ${ModelInterfaceRBDL_INCLUDE_DIRS}
@@ -52,32 +64,54 @@ include_directories(
 
 add_library(quadruped_robot
     src/quadruped_robot.cpp)
-target_link_libraries(quadruped_robot ${OpenSoT_LIBRARIES} ${XBotInterface_LIBRARIES} ${ModelInterfaceRBDL_LIBRARIES})
+target_link_libraries(quadruped_robot
+    ${wolf_controller_utils_LIBRARIES}
+    ${OpenSoT_LIBRARIES}
+    ${XBotInterface_LIBRARIES}
+    ${ModelInterfaceRBDL_LIBRARIES})
 
 add_library(cartesian_trajectory
     src/cartesian_trajectory.cpp)
-target_link_libraries(cartesian_trajectory ${OpenSoT_LIBRARIES})
+target_link_libraries(cartesian_trajectory
+    ${OpenSoT_LIBRARIES})
 
 add_library(task_wrappers
     src/task_interface.cpp
-    src/task_ros_wrappers/handler.cpp
-    src/task_ros_wrappers/cartesian.cpp
-    src/task_ros_wrappers/com.cpp
-    src/task_ros_wrappers/momentum.cpp
-    src/task_ros_wrappers/postural.cpp
-    src/task_ros_wrappers/wrench.cpp)
-target_link_libraries(task_wrappers cartesian_trajectory quadruped_robot ${catkin_LIBRARIES} ${OpenSoT_LIBRARIES} ${XBotInterface_LIBRARIES} ${ModelInterfaceRBDL_LIBRARIES})
+    src/${TASK_WRAPPERS_FOLDER}/handler.cpp
+    src/${TASK_WRAPPERS_FOLDER}/cartesian.cpp
+    src/${TASK_WRAPPERS_FOLDER}/com.cpp
+    src/${TASK_WRAPPERS_FOLDER}/momentum.cpp
+    src/${TASK_WRAPPERS_FOLDER}/postural.cpp
+    src/${TASK_WRAPPERS_FOLDER}/wrench.cpp
+    )
+target_link_libraries(task_wrappers 
+    cartesian_trajectory 
+    quadruped_robot
+    ${tf2_LIBRARIES}
+    ${realtime_tools_conversions_LIBRARIES}
+    ${wolf_controller_utils_LIBRARIES}
+    ${interactive_markers_LIBRARIES}
+    ${OpenSoT_LIBRARIES}
+    ${XBotInterface_INCLUDE_DIRS}
+    ${ModelInterfaceRBDL_INCLUDE_DIRS})
 
-add_library(id_problem
-    src/id_problem.cpp)
-target_link_libraries(id_problem quadruped_robot task_wrappers ${catkin_LIBRARIES} ${OpenSoT_LIBRARIES}
-    ${XBotInterface_LIBRARIES} ${ModelInterfaceRBDL_LIBRARIES})
+add_library(id_problem src/id_problem.cpp)
+target_link_libraries(id_problem 
+    quadruped_robot 
+    task_wrappers 
+    ${OpenSoT_LIBRARIES}
+    ${XBotInterface_LIBRARIES} 
+    ${ModelInterfaceRBDL_LIBRARIES})
 
-install(TARGETS quadruped_robot cartesian_trajectory task_wrappers id_problem
-  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+# Installation
+install(
+  DIRECTORY include/${PROJECT_NAME}
+  DESTINATION ${CMAKE_INSTALL_PREFIX}/include
 )
 
-install(DIRECTORY include/${PROJECT_NAME}/
-        DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION})
+install(
+  TARGETS quadruped_robot cartesian_trajectory id_problem task_wrappers
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+  LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+  RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+)

@@ -13,9 +13,6 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 // ROS
 #include <interactive_markers/menu_handler.h>
 #include <urdf/model.h>
-#include <tf_conversions/tf_eigen.h>
-#include <eigen_conversions/eigen_msg.h>
-#include <tf/transform_listener.h>
 #include <std_srvs/Empty.h>
 #include <geometry_msgs/PoseArray.h>
 
@@ -166,11 +163,6 @@ private:
    * @brief use_mesh_ true if the end-effector mesh is used for the marker visualization
    */
   bool use_mesh_;
-
-  /**
-   * @brief listener_ TF listener
-   */
-  tf::TransformListener listener_;
 
   /**
    * @brief Cartesian trajectory interpolator

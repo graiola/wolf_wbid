@@ -8,6 +8,9 @@
 // WoLF
 #include <wolf_wbid/task_ros_wrappers/cartesian.h>
 #include <wolf_controller_utils/converters.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_eigen/tf2_eigen.h>
+#include <geometry_msgs/TransformStamped.h>
 
 using namespace wolf_controller_utils;
 using namespace wolf_wbid;
@@ -120,19 +123,17 @@ void CartesianImpl::loadParams()
   Eigen::Matrix6d Kp = Eigen::Matrix6d::Zero();
   Eigen::Matrix6d Kd = Eigen::Matrix6d::Zero();
 
-  std::vector<std::string> cartesian_names = {"x","y","z","roll","pitch","yaw"};
-
   bool use_identity = false;
-  for(unsigned int i=0; i<cartesian_names.size(); i++)
+  for(unsigned int i=0; i<wolf_controller_utils::_cartesian_names.size(); i++)
   {
-    if (!nh_.getParam("gains/"+_task_id+"/Kp/" + cartesian_names[i] , Kp(i,i)))
+    if (!nh_.getParam("gains/"+_task_id+"/Kp/" + wolf_controller_utils::_cartesian_names[i] , Kp(i,i)))
     {
-      ROS_DEBUG("No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",cartesian_names[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
+      ROS_DEBUG("No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_cartesian_names[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
       use_identity = true;
     }
-    if (!nh_.getParam("gains/"+_task_id+"/Kd/" + cartesian_names[i] , Kd(i,i)))
+    if (!nh_.getParam("gains/"+_task_id+"/Kd/" + wolf_controller_utils::_cartesian_names[i] , Kd(i,i)))
     {
-      ROS_DEBUG("No Kd.%s gain given for task %s in the namespace: %s, using an identity matrix. ",cartesian_names[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
+      ROS_DEBUG("No Kd.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_cartesian_names[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
       use_identity = true;
     }
     // Check if the values are positive
@@ -336,7 +337,7 @@ void CartesianImpl::processFeedback(const visualization_msgs::InteractiveMarkerF
 
   Eigen::Affine3d pose_reference = Eigen::Affine3d::Identity();
   Eigen::Vector6d twist_reference = Eigen::Vector6d::Zero();
-  tf::poseMsgToEigen(feedback->pose,pose_reference);
+  pose_reference = wolf_controller_utils::poseToAffine3d(feedback->pose); //tf::poseMsgToEigen(feedback->pose,pose_reference);
 
   if(is_continuous_ == true)
   {
@@ -354,8 +355,8 @@ void CartesianImpl::referenceCallback(const wolf_msgs::Cartesian::ConstPtr& msg)
 
   Eigen::Affine3d pose_reference = Eigen::Affine3d::Identity();
   Eigen::Vector6d twist_reference = Eigen::Vector6d::Zero();
-  tf::poseMsgToEigen(msg->pose,pose_reference);
-  tf::twistMsgToEigen(msg->twist,twist_reference);
+  pose_reference = wolf_controller_utils::poseToAffine3d(msg->pose); // tf::poseMsgToEigen(msg->pose,pose_reference);
+  twist_reference = wolf_controller_utils::twistToVector6d(msg->twist); // tf::twistMsgToEigen(msg->twist,twist_reference);
 
   // Check if reference frame changed
   if(msg->header.frame_id != "" && msg->header.frame_id != getBaseLink() && OPTIONS.set_ext_reference)
@@ -397,22 +398,28 @@ visualization_msgs::Marker CartesianImpl::makeSphere(visualization_msgs::Interac
 
 Eigen::Affine3d CartesianImpl::getPose(const std::string& base_link, const std::string& distal_link)
 {
-  tf::StampedTransform transform;
+  static tf2_ros::Buffer buffer;
+  static tf2_ros::TransformListener listener(buffer);
+
+  geometry_msgs::TransformStamped transformStamped;
   for(unsigned int i = 0; i < 10; ++i)
   {
     try
     {
-      listener_.waitForTransform(base_link, distal_link,ros::Time(0),ros::Duration(1.0));
-      listener_.lookupTransform(base_link, distal_link,ros::Time(0),transform);
+      // Use the tf2 buffer to lookup the transform
+      transformStamped = buffer.lookupTransform(base_link, distal_link, ros::Time(0), ros::Duration(1.0));
+      break; // Exit loop if transform is successfully obtained
     }
-    catch (tf::TransformException ex)
+    catch (tf2::TransformException &ex)
     {
-      ROS_ERROR("%s",ex.what());
+      ROS_ERROR("%s", ex.what());
       ros::Duration(1.0).sleep();
     }
   }
+
   Eigen::Affine3d pose;
-  tf::transformTFToEigen(transform,pose);
+  // Convert the TransformStamped to Eigen::Affine3d
+  pose = tf2::transformToEigen(transformStamped.transform);
   return pose;
 }
 
@@ -577,7 +584,7 @@ void CartesianImpl::sendWayPoints(const visualization_msgs::InteractiveMarkerFee
   {
     CartesianTrajectory::WayPoint wp;
 
-    tf::poseMsgToEigen(waypoints_[i], wp.T_ref);
+    wp.T_ref = wolf_controller_utils::poseToAffine3d(waypoints_[i]); // tf::poseMsgToEigen(waypoints_[i], wp.T_ref);
     wp.duration = T_.at(i);
 
     wpv.push_back(wp);

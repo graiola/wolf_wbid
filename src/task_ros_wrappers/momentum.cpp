@@ -56,14 +56,12 @@ void AngularMomentumImpl::loadParams()
   // Load params
   Eigen::Matrix3d K = Eigen::Matrix3d::Zero();
 
-  std::vector<std::string> rpy = {"roll","pitch","yaw"};
-
   bool use_identity = false;
-  for(unsigned int i=0; i<rpy.size(); i++)
+  for(unsigned int i=0; i<wolf_controller_utils::_rpy.size(); i++)
   {
-    if (!nh_.getParam("gains/"+_task_id+"/K/" + rpy[i] , K(i,i)))
+    if (!nh_.getParam("gains/"+_task_id+"/K/" + wolf_controller_utils::_rpy[i] , K(i,i)))
     {
-      ROS_DEBUG("No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",rpy[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
+      ROS_DEBUG("No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_rpy[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
       use_identity = true;
     }
     // Check if the values are positive

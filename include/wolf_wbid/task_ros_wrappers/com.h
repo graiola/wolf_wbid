@@ -59,5 +59,5 @@ private:
 
 } // namespace
 
-#endif // ROS_WRAPPERS_COM_H
+#endif // TASK_ROS_WRAPPERS_COM_H
 

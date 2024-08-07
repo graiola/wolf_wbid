@@ -76,18 +76,16 @@ void ComImpl::loadParams()
   Eigen::Matrix3d Kd = Eigen::Matrix3d::Zero();
   bool use_identity = false;
 
-  std::vector<std::string> xyz = {"x","y","z"};
-
-  for(unsigned int i=0; i<xyz.size(); i++)
+  for(unsigned int i=0; i<wolf_controller_utils::_xyz.size(); i++)
   {
-    if (!nh_.getParam("gains/"+_task_id+"/Kp/" + xyz[i] , Kp(i,i)))
+    if (!nh_.getParam("gains/"+_task_id+"/Kp/" + wolf_controller_utils::_xyz[i] , Kp(i,i)))
     {
-      ROS_DEBUG("No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",xyz[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
+      ROS_DEBUG("No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_xyz[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
       use_identity = true;
     }
-    if (!nh_.getParam("gains/"+_task_id+"/Kd/"  + xyz[i] , Kd(i,i)))
+    if (!nh_.getParam("gains/"+_task_id+"/Kd/"  + wolf_controller_utils::_xyz[i] , Kd(i,i)))
     {
-      ROS_DEBUG("No Kd.%s gain given for task %s in the namespace: %s, using an identity matrix. ",xyz[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
+      ROS_DEBUG("No Kd.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_xyz[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
       use_identity = true;
     }
     // Check if the values are positive

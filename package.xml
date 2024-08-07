@@ -16,7 +16,6 @@
   <depend>tf</depend>
   <depend>tf_conversions</depend>
   <depend>realtime_tools</depend>
-  <depend>rt_logger</depend>
   <depend>wolf_msgs</depend>
   <depend>wolf_controller_utils</depend>
   <depend>interactive_markers</depend>
