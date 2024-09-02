@@ -7,19 +7,19 @@ You should have received a copy of the license along with this
 work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 **/
 
-#ifndef TASK_ROS_WRAPPERS_MOMENTUM_H
-#define TASK_ROS_WRAPPERS_MOMENTUM_H
+#ifndef TASK_ROS2_WRAPPERS_MOMENTUM_H
+#define TASK_ROS2_WRAPPERS_MOMENTUM_H
 
 // ROS
-#include <wolf_msgs/CartesianTask.h>
+#include <wolf_msgs/msg/cartesian_task.hpp>
 
 // WoLF
-#include <wolf_wbid/task_ros_wrappers/handler.h>
+#include <wolf_wbid/task_ros2_wrappers/handler.h>
 
 namespace wolf_wbid {
 
 // AngularMomentum
-class AngularMomentumImpl : public AngularMomentum, public TaskRosHandler<wolf_msgs::CartesianTask>
+class AngularMomentumImpl : public AngularMomentum, public TaskRosHandler<wolf_msgs::msg::CartesianTask>
 {
 
 public:
@@ -47,5 +47,5 @@ public:
 
 } // namespace
 
-#endif // ROS_WRAPPERS_MOMENTUM_H
+#endif // TASK_ROS2_WRAPPERS_MOMENTUM_H
 

@@ -47,5 +47,5 @@ public:
 
 } // namespace
 
-#endif // ROS_WRAPPERS_MOMENTUM_H
+#endif // TASK_ROS_WRAPPERS_MOMENTUM_H
 

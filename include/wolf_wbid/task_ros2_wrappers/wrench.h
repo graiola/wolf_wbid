@@ -7,15 +7,15 @@ You should have received a copy of the license along with this
 work. If not, see <http://creativewrenchmons.org/licenses/by-nc-nd/4.0/>.
 **/
 
-#ifndef TASK_ROS_WRAPPERS_WRENCH_H
-#define TASK_ROS_WRAPPERS_WRENCH_H
+#ifndef TASK_ROS2_WRAPPERS_WRENCH_H
+#define TASK_ROS2_WRAPPERS_WRENCH_H
 
 // WoLF msgs
-#include <wolf_msgs/WrenchTask.h>
-#include <wolf_msgs/Wrench.h>
+#include <wolf_msgs/msg/wrench_task.hpp>
+#include <wolf_msgs/msg/wrench.hpp>
 
 // WoLF
-#include <wolf_wbid/task_ros_wrappers/handler.h>
+#include <wolf_wbid/task_ros2_wrappers/handler.h>
 
 // WoLF utils
 #include <wolf_controller_utils/converters.h>
@@ -23,7 +23,7 @@ work. If not, see <http://creativewrenchmons.org/licenses/by-nc-nd/4.0/>.
 namespace wolf_wbid {
 
 // Wrench
-class WrenchImpl : public Wrench, public TaskRosHandler<wolf_msgs::WrenchTask>
+class WrenchImpl : public Wrench, public TaskRosHandler<wolf_msgs::msg::WrenchTask>
 {
 
 public:
@@ -51,12 +51,14 @@ private:
 
   virtual void _update(const Eigen::VectorXd& x) override;
 
-  void referenceCallback(const wolf_msgs::Wrench::ConstPtr& msg);
+  void referenceCallback(const wolf_msgs::msg::Wrench::SharedPtr msg);
 
   realtime_tools::RealtimeBuffer<Eigen::Vector6d> buffer_reference_;
+
+  typename rclcpp::Subscription<wolf_msgs::msg::Wrench>::SharedPtr reference_sub_;
 
 };
 
 } // namespace
 
-#endif // task_ROS_WRAPPERS_WRENCH_H
+#endif // TASK_ROS2_WRAPPERS_WRENCH_H

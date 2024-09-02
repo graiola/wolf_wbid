@@ -1,5 +1,5 @@
 /**
-WoLF: WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
+WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 
 WoLF is licensed under a license Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
 
@@ -7,17 +7,20 @@ You should have received a copy of the license along with this
 work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 **/
 
-#ifndef TASK_ROS_WRAPPERS_CARTESIAN_H
-#define TASK_ROS_WRAPPERS_CARTESIAN_H
+#ifndef TASK_ROS2_WRAPPERS_CARTESIAN_H
+#define TASK_ROS2_WRAPPERS_CARTESIAN_H
 
-// ROS
-#include <interactive_markers/menu_handler.h>
+// ROS2
+#include <interactive_markers/menu_handler.hpp>
 #include <urdf/model.h>
-#include <std_srvs/Empty.h>
-#include <geometry_msgs/PoseArray.h>
+#include <std_srvs/srv/empty.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
 
 // WoLF
-#include <wolf_wbid/task_ros_wrappers/handler.h>
+#include <wolf_wbid/task_ros2_wrappers/handler.h>
 #include <wolf_wbid/cartesian_trajectory.h>
 
 // WoLF utils
@@ -25,8 +28,8 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 #include <wolf_controller_utils/converters.h>
 
 // WoLF msgs
-#include <wolf_msgs/CartesianTask.h>
-#include <wolf_msgs/Cartesian.h>
+#include <wolf_msgs/msg/cartesian_task.hpp>
+#include <wolf_msgs/msg/cartesian.hpp>
 
 // STD
 #include <numeric>
@@ -34,12 +37,12 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 namespace wolf_wbid {
 
 // CARTESIAN
-class CartesianImpl : public Cartesian, public TaskRosHandler<wolf_msgs::CartesianTask>
+class CartesianImpl : public Cartesian, public TaskRosHandler<wolf_msgs::msg::CartesianTask>
 {
 
 public:
 
-  typedef std::shared_ptr<CartesianImpl> Ptr;
+  using Ptr = std::shared_ptr<CartesianImpl>;
 
   CartesianImpl(const std::string& robot_name,
             const std::string& task_id,
@@ -67,75 +70,76 @@ protected:
   void createInteractiveMarkerControl(const double qw, const double qx, const double qy, const double qz,
                                       const unsigned int interaction_mode);
 
-  void processFeedback(const visualization_msgs::InteractiveMarkerFeedbackConstPtr& feedback);
+  void processFeedback(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr& feedback);
 
-  void referenceCallback(const wolf_msgs::Cartesian::ConstPtr& msg);
+  void referenceCallback(const wolf_msgs::msg::Cartesian::SharedPtr msg);
 
-  visualization_msgs::InteractiveMarkerControl& makeSTLControl(visualization_msgs::InteractiveMarker& msg);
+  visualization_msgs::msg::InteractiveMarkerControl& makeSTLControl(visualization_msgs::msg::InteractiveMarker& msg);
 
-  visualization_msgs::Marker makeSphere(visualization_msgs::InteractiveMarker& msg);
+  visualization_msgs::msg::Marker makeSphere(visualization_msgs::msg::InteractiveMarker& msg);
 
-  visualization_msgs::Marker makeSTL( visualization_msgs::InteractiveMarker &msg );
+  visualization_msgs::msg::Marker makeSTL( visualization_msgs::msg::InteractiveMarker &msg );
 
   Eigen::Affine3d getPose(const std::string& base_link, const std::string& distal_link);
 
   void makeMenu();
 
-  void changeBaseLink(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, std::string new_base_link);
+  void changeBaseLink(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr &feedback, std::string new_base_link);
 
-  void sendWayPoints(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
+  void sendWayPoints(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr &feedback);
 
-  void resetMarker(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
+  void resetMarker(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr &feedback);
 
-  void resetLastWayPoints(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
+  void resetLastWayPoints(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr &feedback);
 
-  void resetAllWayPoints(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
+  void resetAllWayPoints(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr &feedback);
 
-  void wayPointCallBack(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, double T);
+  void wayPointCallBack(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr &feedback, double T);
 
-  void publishWP(const std::vector<geometry_msgs::Pose>& wps);
+  void publishWP(const std::vector<geometry_msgs::msg::Pose>& wps);
 
   bool clearMarker();
 
   bool spawnMarker();
 
-  void setContinuousCtrl(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
+  void setContinuousCtrl(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr &feedback);
 
 private:
 
   virtual void _update(const Eigen::VectorXd& x) override;
 
   /**
-   * @brief waypoints_pub_ ROS publisher with the waypoint poses
+   * @brief waypoints_pub_ ROS2 publisher for the waypoint poses
    */
-  ros::Publisher waypoints_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr waypoints_pub_;
 
   /**
-   * @brief is_continuous_ true if the poses are directly given to the task
+   * @brief is_continuous_ True if the poses are directly given to the task
    */
   bool is_continuous_;
 
   /**
-   * @brief waypoints_ contains all the waypoints BUT not the initial position!
+   * @brief waypoints_ Stores all the waypoints, excluding the initial position
    */
-  std::vector<geometry_msgs::Pose> waypoints_;
+  std::vector<geometry_msgs::msg::Pose> waypoints_;
 
   /**
-   * @brief T_ contains the times of each waypoint-trajectory
+   * @brief T_ Stores the time of each waypoint in the trajectory
    */
   std::vector<float> T_;
 
   int control_type_;
 
-  std_srvs::EmptyRequest req_;
-  std_srvs::EmptyResponse res_;
+  std::shared_ptr<std_srvs::srv::Empty::Request> req_;
+  std::shared_ptr<std_srvs::srv::Empty::Response> res_;
 
   /**
    * @brief Marker variables
    */
-  visualization_msgs::InteractiveMarker interactive_marker_;
+  std::string marker_name_;
+  visualization_msgs::msg::InteractiveMarker interactive_marker_;
   interactive_markers::InteractiveMarkerServer interactive_marker_server_;
-  visualization_msgs::Marker marker_;
+  visualization_msgs::msg::Marker marker_;
   interactive_markers::MenuHandler menu_handler_;
   interactive_markers::MenuHandler::EntryHandle reset_marker_entry_;
   interactive_markers::MenuHandler::EntryHandle way_point_entry_;
@@ -146,8 +150,8 @@ private:
   interactive_markers::MenuHandler::EntryHandle reset_all_way_points_entry_;
   interactive_markers::MenuHandler::EntryHandle send_way_points_entry_;
   interactive_markers::MenuHandler::EntryHandle continuous_control_entry_;
-  visualization_msgs::InteractiveMarkerControl  menu_control_;
-  std::map<std::string,interactive_markers::MenuHandler::EntryHandle> map_link_entries_;
+  visualization_msgs::msg::InteractiveMarkerControl menu_control_;
+  std::map<std::string, interactive_markers::MenuHandler::EntryHandle> map_link_entries_;
 
   /**
    * @brief urdf_ model description of the robot
@@ -155,34 +159,40 @@ private:
   urdf::ModelInterface urdf_;
 
   /**
-   * @brief links_ urdf available links
+   * @brief links_ Available URDF links
    */
   std::vector<urdf::LinkSharedPtr> links_;
 
   /**
-   * @brief use_mesh_ true if the end-effector mesh is used for the marker visualization
+   * @brief use_mesh_ True if the end-effector mesh is used for marker visualization
    */
   bool use_mesh_;
 
   /**
-   * @brief listener_ TF listener
+   * @brief tf_buffer_ TF2 buffer for transform lookup
    */
-  tf::TransformListener listener_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
 
   /**
-   * @brief Cartesian trajectory interpolator
+   * @brief listener_ TF2 transform listener
+   */
+  std::shared_ptr<tf2_ros::TransformListener> listener_;
+
+  /**
+   * @brief trj_ Cartesian trajectory interpolator
    */
   CartesianTrajectory::Ptr trj_;
 
   /**
-   * @brief Realtime buffers
+   * @brief Realtime buffers for reference pose and twist
    */
   realtime_tools::RealtimeBuffer<Eigen::Affine3d> buffer_reference_pose_;
   realtime_tools::RealtimeBuffer<Eigen::Vector6d> buffer_reference_twist_;
 
+  typename rclcpp::Subscription<wolf_msgs::msg::Cartesian>::SharedPtr reference_sub_;
+
 };
 
-} // namespace
+} // namespace wolf_wbid
 
-#endif // ROS_WRAPPERS_CARTESIAN_H
-
+#endif // TASK_ROS2_WRAPPERS_CARTESIAN_H

@@ -1,10 +1,10 @@
 /**
-WoLF: WoLF: Whole-body Lowrenchotion Framework for quadruped robots (c) by Gennaro Raiola
+WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 
-WoLF is licensed under a license Creative Wrenchmons Attribution-NonWrenchmercial-NoDerivatives 4.0 International License.
+WoLF is licensed under a license Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
 
 You should have received a copy of the license along with this
-work. If not, see <http://creativewrenchmons.org/licenses/by-nc-nd/4.0/>.
+work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 **/
 
 #ifndef TASK_ROS_WRAPPERS_WRENCH_H
@@ -59,4 +59,4 @@ private:
 
 } // namespace
 
-#endif // task_ROS_WRAPPERS_WRENCH_H
+#endif // TASK_ROS_WRAPPERS_WRENCH_H

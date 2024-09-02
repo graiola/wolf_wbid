@@ -1,5 +1,5 @@
 /**
-WoLF: WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
+WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 
 WoLF is licensed under a license Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
 
@@ -179,5 +179,5 @@ private:
 
 } // namespace
 
-#endif // ROS_WRAPPERS_CARTESIAN_H
+#endif // TASK_ROS_WRAPPERS_CARTESIAN_H
 

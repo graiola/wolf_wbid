@@ -14,6 +14,12 @@
   #include <wolf_wbid/task_ros_wrappers/momentum.h>
   #include <wolf_wbid/task_ros_wrappers/postural.h>
   #include <wolf_wbid/task_ros_wrappers/wrench.h>
+#elif defined(ROS2)
+  #include <wolf_wbid/task_ros2_wrappers/cartesian.h>
+  #include <wolf_wbid/task_ros2_wrappers/com.h>
+  #include <wolf_wbid/task_ros2_wrappers/momentum.h>
+  #include <wolf_wbid/task_ros2_wrappers/postural.h>
+  #include <wolf_wbid/task_ros2_wrappers/wrench.h>
 #endif
 
 using namespace OpenSoT;

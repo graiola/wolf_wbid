@@ -6,14 +6,14 @@
  */
 
 // WoLF
-#include <wolf_wbid/task_ros_wrappers/postural.h>
+#include <wolf_wbid/task_ros2_wrappers/postural.h>
 
 using namespace wolf_wbid;
 
 PosturalImpl::PosturalImpl(const std::string& robot_name, const XBot::ModelInterface& robot,
                    OpenSoT::AffineHelper qddot, const std::string& task_id, const double& period)
   :Postural(robot_name,robot,qddot,task_id,period)
-  ,TaskRosHandler<wolf_msgs::PosturalTask>(task_id,robot_name,period)
+  ,TaskRosHandler<wolf_msgs::msg::PosturalTask>(task_id,robot_name,period)
 {
   const unsigned int& size = getActualPositions().size();
   tmp_vectorXd_.resize(size);
@@ -31,29 +31,30 @@ void PosturalImpl::registerReconfigurableVariables()
   double lambda1 = getLambda();
   double lambda2 = getLambda2();
   double weight  = getWeight()(0,0);
-  ddr_server_->registerVariable<double>("set_lambda_1",    lambda1,     boost::bind(&TaskWrapperInterface::setLambda1,this,_1)    ,"set lambda 1"   ,0.0,1000.0);
+  //FIXME
+  /*ddr_server_->registerVariable<double>("set_lambda_1",    lambda1,     boost::bind(&TaskWrapperInterface::setLambda1,this,_1)    ,"set lambda 1"   ,0.0,1000.0);
   ddr_server_->registerVariable<double>("set_lambda_2",    lambda2,     boost::bind(&TaskWrapperInterface::setLambda2,this,_1)    ,"set lambda 2"   ,0.0,1000.0);
   ddr_server_->registerVariable<double>("set_weight_diag", weight,      boost::bind(&TaskWrapperInterface::setWeightDiag,this,_1) ,"set weight diag",0.0,1000.0);
-  ddr_server_->publishServicesTopics();
+  ddr_server_->publishServicesTopics();*/
 }
 
 void PosturalImpl::loadParams()
 {
 
   double lambda1, lambda2, weight;
-  if (!nh_.getParam("gains/"+_task_id+"/lambda1" , lambda1))
+  if (!nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
   {
-    ROS_DEBUG("No lambda1 gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
+    RCLCPP_DEBUG(nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     lambda1 = getLambda();
   }
-  if (!nh_.getParam("gains/"+_task_id+"/lambda2" , lambda2))
+  if (!nh_->get_parameter("gains/"+_task_id+"/lambda2" , lambda2))
   {
-    ROS_DEBUG("No lambda2 gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
+    RCLCPP_DEBUG(nh_->get_logger(),"No lambda2 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     lambda2 = getLambda2();
   }
-  if (!nh_.getParam("gains/"+_task_id+"/weight" , weight))
+  if (!nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
   {
-    ROS_DEBUG("No weight gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
+    RCLCPP_DEBUG(nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     weight = getWeight()(0,0);
   }
   // Check if the values are positive
@@ -78,7 +79,7 @@ void PosturalImpl::publish()
   if(rt_pub_->trylock())
   {
     rt_pub_->msg_.header.frame_id = "Joints";
-    rt_pub_->msg_.header.stamp = ros::Time::now();
+    rt_pub_->msg_.header.stamp = nh_->now();
 
     for(unsigned int i = 0;i<getActualPositions().size();i++)
     {

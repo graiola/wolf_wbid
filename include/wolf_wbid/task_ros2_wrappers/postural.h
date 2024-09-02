@@ -7,19 +7,19 @@ You should have received a copy of the license along with this
 work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 **/
 
-#ifndef TASK_ROS_WRAPPERS_POSTURAL_H
-#define TASK_ROS_WRAPPERS_POSTURAL_H
+#ifndef TASK_ROS2_WRAPPERS_POSTURAL_H
+#define TASK_ROS2_WRAPPERS_POSTURAL_H
 
 // ROS
-#include <wolf_msgs/PosturalTask.h>
+#include <wolf_msgs/msg/postural_task.hpp>
 
 // WoLF
-#include <wolf_wbid/task_ros_wrappers/handler.h>
+#include <wolf_wbid/task_ros2_wrappers/handler.h>
 
 namespace wolf_wbid {
 
 // POSTURAL
-class PosturalImpl : public Postural, public TaskRosHandler<wolf_msgs::PosturalTask>
+class PosturalImpl : public Postural, public TaskRosHandler<wolf_msgs::msg::PosturalTask>
 {
 
 public:
@@ -50,5 +50,5 @@ private:
 
 } // namespace
 
-#endif // ROS_WRAPPERS_POSTURAL_H
+#endif // TASK_ROS2_WRAPPERS_POSTURAL_H
 

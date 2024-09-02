@@ -6,7 +6,7 @@
  */
 
 // WoLF
-#include <wolf_wbid/task_ros_wrappers/wrench.h>
+#include <wolf_wbid/task_ros2_wrappers/wrench.h>
 
 using namespace wolf_wbid;
 
@@ -17,7 +17,7 @@ WrenchImpl::WrenchImpl(const std::string& robot_name,
                        OpenSoT::AffineHelper& wrench,
                        const double& period)
   :Wrench(robot_name,task_id,distal_link,base_link,wrench,period)
-  ,TaskRosHandler<wolf_msgs::WrenchTask>(task_id,robot_name,period)
+  ,TaskRosHandler<wolf_msgs::msg::WrenchTask>(task_id,robot_name,period)
 {
   tmp_vectorXd_.resize(6); // Wrench
   tmp_vectorXd_.setZero();
@@ -26,30 +26,34 @@ WrenchImpl::WrenchImpl(const std::string& robot_name,
   buffer_reference_.initRT(tmp_vectorXd_);
 
   // Create the reference subscriber
-  reference_sub_ = nh_.subscribe("reference/"+_task_id, 1000, &WrenchImpl::referenceCallback, this);
+  reference_sub_ = nh_->create_subscription<wolf_msgs::msg::Wrench>(
+      "reference/" + _task_id, 1000,
+      std::bind(&WrenchImpl::referenceCallback, this, std::placeholders::_1)
+  );
 }
 
 void WrenchImpl::registerReconfigurableVariables()
 {
   double lambda1 = getLambda();
   double weight  = getWeight()(0,0);
-  ddr_server_->registerVariable<double>("set_lambda_1",    lambda1,     boost::bind(&TaskWrapperInterface::setLambda1,this,_1)    ,"set lambda 1"   ,0.0,1000.0);
+  // FIXME
+  /*ddr_server_->registerVariable<double>("set_lambda_1",    lambda1,     boost::bind(&TaskWrapperInterface::setLambda1,this,_1)    ,"set lambda 1"   ,0.0,1000.0);
   ddr_server_->registerVariable<double>("set_weight_diag", weight,      boost::bind(&TaskWrapperInterface::setWeightDiag,this,_1) ,"set weight diag",0.0,1000.0);
-  ddr_server_->publishServicesTopics();
+  ddr_server_->publishServicesTopics();*/
 }
 
 void WrenchImpl::loadParams()
 {
 
   double lambda1, weight;
-  if (!nh_.getParam("gains/"+_task_id+"/lambda1" , lambda1))
+  if (!nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
   {
-    ROS_DEBUG("No lambda1 gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
+    RCLCPP_DEBUG(nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     lambda1 = getLambda();
   }
-  if (!nh_.getParam("gains/"+_task_id+"/weight" , weight))
+  if (!nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
   {
-    ROS_DEBUG("No weight gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
+    RCLCPP_DEBUG(nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     weight = getWeight()(0,0);
   }
   // Check if the values are positive
@@ -73,7 +77,7 @@ void WrenchImpl::publish()
   if(rt_pub_->trylock())
   {
     rt_pub_->msg_.header.frame_id = getBaseLink();
-    rt_pub_->msg_.header.stamp = ros::Time::now();
+    rt_pub_->msg_.header.stamp = nh_->now();
 
     // FIXME
     // ACTUAL VALUES
@@ -123,12 +127,12 @@ bool WrenchImpl::reset()
   return res;
 }
 
-void WrenchImpl::referenceCallback(const wolf_msgs::Wrench::ConstPtr& msg)
+void WrenchImpl::referenceCallback(const wolf_msgs::msg::Wrench::SharedPtr msg)
 {
   double period = period_;
 
-  if(last_time_ != 0.0)
-    period = msg->header.stamp.toSec() - last_time_;
+  if (last_time_ != 0.0)
+      period = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9 - last_time_;
 
   Eigen::Vector6d reference = Eigen::Vector6d::Zero();
   reference(0) = msg->wrench.force.x;
@@ -136,5 +140,5 @@ void WrenchImpl::referenceCallback(const wolf_msgs::Wrench::ConstPtr& msg)
   reference(2) = msg->wrench.force.z;
   buffer_reference_.writeFromNonRT(reference);
 
-  last_time_ = msg->header.stamp.toSec();
+  last_time_ = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9;
 }
