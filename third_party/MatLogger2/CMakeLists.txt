@@ -126,8 +126,7 @@ if(BUILD_TESTS)
 endif()
 
 # Add the uninstall target
-
-include(AddUninstallTarget)
+#include(AddUninstallTarget)
 
 # Specify installation targets, typology and destination folders.
 
