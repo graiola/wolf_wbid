@@ -1,0 +1,14 @@
+# CENTAURO config
+XBotInterface:
+  urdf_path: $PWD/../urdf/centauro_upperbody.urdf
+  srdf_path: $PWD/../srdf/centauro_upperbody.srdf
+  joint_map_path: $PWD/../joint_map/centauro_test_joint_map_upperbody.yaml
+
+RobotInterface:
+  framework_name: "ROS"
+  
+ModelInterface:
+  model_type: "RBDL"
+  is_model_floating_base: "false"
+
+

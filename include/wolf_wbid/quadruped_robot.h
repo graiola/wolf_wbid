@@ -11,7 +11,6 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 #define WOLF_WBID_QUADRUPED_ROBOT_H
 
 // ADVR
-#include <XBotCoreModel/XBotCoreModel.h>
 #include <ModelInterfaceRBDL/ModelInterfaceRBDL.h>
 // STD
 #include <memory>
