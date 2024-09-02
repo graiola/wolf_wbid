@@ -1,0 +1,14 @@
+# WALKMAN config
+
+XBotInterface:
+  urdf_path: $PWD/../urdf/bigman.urdf
+  srdf_path: $PWD/../srdf/bigman.srdf
+  joint_map_path: $PWD/../joint_map/bigman_ecat_joint_map.yaml
+
+RobotInterface:
+  framework_name: "YARP"
+  
+ModelInterface:
+  model_type: "RBDL"
+  is_model_floating_base: "false"
+  
