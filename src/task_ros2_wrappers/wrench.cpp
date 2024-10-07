@@ -26,7 +26,7 @@ WrenchImpl::WrenchImpl(const std::string& robot_name,
   buffer_reference_.initRT(tmp_vectorXd_);
 
   // Create the reference subscriber
-  reference_sub_ = nh_->create_subscription<wolf_msgs::msg::Wrench>(
+  reference_sub_ = task_nh_->create_subscription<wolf_msgs::msg::Wrench>(
       "reference/" + _task_id, 1000,
       std::bind(&WrenchImpl::referenceCallback, this, std::placeholders::_1)
   );
@@ -46,14 +46,14 @@ void WrenchImpl::loadParams()
 {
 
   double lambda1, weight;
-  if (!nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
+  if (!task_nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
   {
-    RCLCPP_DEBUG(nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
+    RCLCPP_DEBUG(task_nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     lambda1 = getLambda();
   }
-  if (!nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
+  if (!task_nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
   {
-    RCLCPP_DEBUG(nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
+    RCLCPP_DEBUG(task_nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     weight = getWeight()(0,0);
   }
   // Check if the values are positive
@@ -77,7 +77,7 @@ void WrenchImpl::publish()
   if(rt_pub_->trylock())
   {
     rt_pub_->msg_.header.frame_id = getBaseLink();
-    rt_pub_->msg_.header.stamp = nh_->now();
+    rt_pub_->msg_.header.stamp = task_nh_->now();
 
     // FIXME
     // ACTUAL VALUES

@@ -42,19 +42,19 @@ void PosturalImpl::loadParams()
 {
 
   double lambda1, lambda2, weight;
-  if (!nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
+  if (!task_nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
   {
-    RCLCPP_DEBUG(nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
+    RCLCPP_DEBUG(task_nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     lambda1 = getLambda();
   }
-  if (!nh_->get_parameter("gains/"+_task_id+"/lambda2" , lambda2))
+  if (!task_nh_->get_parameter("gains/"+_task_id+"/lambda2" , lambda2))
   {
-    RCLCPP_DEBUG(nh_->get_logger(),"No lambda2 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
+    RCLCPP_DEBUG(task_nh_->get_logger(),"No lambda2 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     lambda2 = getLambda2();
   }
-  if (!nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
+  if (!task_nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
   {
-    RCLCPP_DEBUG(nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
+    RCLCPP_DEBUG(task_nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     weight = getWeight()(0,0);
   }
   // Check if the values are positive
@@ -79,7 +79,7 @@ void PosturalImpl::publish()
   if(rt_pub_->trylock())
   {
     rt_pub_->msg_.header.frame_id = "Joints";
-    rt_pub_->msg_.header.stamp = nh_->now();
+    rt_pub_->msg_.header.stamp = task_nh_->now();
 
     for(unsigned int i = 0;i<getActualPositions().size();i++)
     {

@@ -91,7 +91,7 @@ elseif(${ament_cmake_FOUND})
     message(STATUS "Add ROS2 definition")
 endif()
 
-add_library(quadruped_robot
+add_library(quadruped_robot SHARED
     src/quadruped_robot.cpp)
 target_link_libraries(quadruped_robot
     ${wolf_controller_utils_LIBRARIES}
@@ -100,12 +100,12 @@ target_link_libraries(quadruped_robot
     XBotCoreModel
     ModelInterfaceRBDL)
 
-add_library(cartesian_trajectory
+add_library(cartesian_trajectory SHARED
     src/cartesian_trajectory.cpp)
 target_link_libraries(cartesian_trajectory
     OpenSoT)
 
-add_library(task_wrappers
+add_library(task_wrappers SHARED
     src/task_interface.cpp
     src/${TASK_WRAPPERS_FOLDER}/handler.cpp
     src/${TASK_WRAPPERS_FOLDER}/cartesian.cpp
@@ -120,13 +120,14 @@ target_link_libraries(task_wrappers
     ${tf2_LIBRARIES}
     ${realtime_tools_conversions_LIBRARIES}
     ${wolf_controller_utils_LIBRARIES}
+    ${wolf_msgs_LIBRARIES}
     ${interactive_markers_LIBRARIES}
     OpenSoT
     XBotInterface
     XBotCoreModel
     ModelInterfaceRBDL)
 
-add_library(id_problem src/id_problem.cpp)
+add_library(id_problem SHARED src/id_problem.cpp)
 target_link_libraries(id_problem
     quadruped_robot 
     task_wrappers 

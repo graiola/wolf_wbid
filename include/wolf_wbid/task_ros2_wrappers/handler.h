@@ -20,6 +20,7 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 
 // STD
 #include <memory>
+#include <thread>
 
 // WoLF
 #include <wolf_wbid/task_interface.h>
@@ -38,13 +39,14 @@ public:
 
 protected:
 
-  std::shared_ptr<rclcpp::Node> nh_;
+  //std::shared_ptr<rclcpp::Node> nh_;
   std::shared_ptr<rclcpp::Node> task_nh_;
 
   //std::shared_ptr<ddynamic_reconfigure::DDynamicReconfigure> ddr_server_;
   std::shared_ptr<realtime_tools::RealtimePublisher<Msg_type>> rt_pub_;
 
   std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> spinner_;
+  std::shared_ptr<std::thread> spinner_thread_;
 };
 
 } // namespace wolf_wbid

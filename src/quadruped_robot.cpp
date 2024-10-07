@@ -67,7 +67,7 @@ QuadrupedRobot::QuadrupedRobot(const std::string& robot_name, const std::string&
   if(!RigidBodyDynamics::Addons::URDFReadFromString(getUrdfString().c_str(), &virtual_model_, isFloatingBase(), false))
       throw std::runtime_error("Can not initialize virtual model");
 
-  parser_.parseSRDF(robot_name);
+  parser_.parseSRDF(urdf,srdf);
   robot_model_name_ = parser_.getRobotModelName();
   leg_names_        = parser_.getLegNames();
   foot_names_       = parser_.getFootNames();

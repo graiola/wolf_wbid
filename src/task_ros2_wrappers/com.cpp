@@ -21,7 +21,7 @@ ComImpl::ComImpl(const std::string& robot_name,
     buffer_reference_pos_.initRT(tmp_vector3d_);
     buffer_reference_vel_.initRT(tmp_vector3d_);
 
-    reference_sub_ = nh_->create_subscription<wolf_msgs::msg::Com>(
+    reference_sub_ = task_nh_->create_subscription<wolf_msgs::msg::Com>(
         "reference/" + _task_id, 1000,
         std::bind(&ComImpl::referenceCallback, this, std::placeholders::_1)
     );
@@ -55,19 +55,19 @@ void ComImpl::loadParams()
 {
     double lambda1, lambda2, weight;
 
-    if (!nh_->get_parameter("gains/" + _task_id + "/lambda1", lambda1))
+    if (!task_nh_->get_parameter("gains/" + _task_id + "/lambda1", lambda1))
     {
-        RCLCPP_DEBUG(nh_->get_logger(), "No lambda1 gain given for task %s, using default value.", _task_id.c_str());
+        RCLCPP_DEBUG(task_nh_->get_logger(), "No lambda1 gain given for task %s, using default value.", _task_id.c_str());
         lambda1 = getLambda();
     }
-    if (!nh_->get_parameter("gains/" + _task_id + "/lambda2", lambda2))
+    if (!task_nh_->get_parameter("gains/" + _task_id + "/lambda2", lambda2))
     {
-        RCLCPP_DEBUG(nh_->get_logger(), "No lambda2 gain given for task %s, using default value.", _task_id.c_str());
+        RCLCPP_DEBUG(task_nh_->get_logger(), "No lambda2 gain given for task %s, using default value.", _task_id.c_str());
         lambda2 = getLambda2();
     }
-    if (!nh_->get_parameter("gains/" + _task_id + "/weight", weight))
+    if (!task_nh_->get_parameter("gains/" + _task_id + "/weight", weight))
     {
-        RCLCPP_DEBUG(nh_->get_logger(), "No weight gain given for task %s, using default value.", _task_id.c_str());
+        RCLCPP_DEBUG(task_nh_->get_logger(), "No weight gain given for task %s, using default value.", _task_id.c_str());
         weight = getWeight()(0,0);
     }
 
@@ -87,14 +87,14 @@ void ComImpl::loadParams()
 
     for(unsigned int i=0; i<wolf_controller_utils::_xyz.size(); i++)
     {
-        if (!nh_->get_parameter("gains/"+_task_id+"/Kp/" + wolf_controller_utils::_xyz[i] , Kp(i,i)))
+        if (!task_nh_->get_parameter("gains/"+_task_id+"/Kp/" + wolf_controller_utils::_xyz[i] , Kp(i,i)))
         {
-        RCLCPP_DEBUG(nh_->get_logger(), "No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_xyz[i].c_str(),_task_id.c_str(),robot_name_.c_str());
+        RCLCPP_DEBUG(task_nh_->get_logger(), "No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_xyz[i].c_str(),_task_id.c_str(),robot_name_.c_str());
         use_identity = true;
         }
-        if (!nh_->get_parameter("gains/"+_task_id+"/Kd/"  + wolf_controller_utils::_xyz[i] , Kd(i,i)))
+        if (!task_nh_->get_parameter("gains/"+_task_id+"/Kd/"  + wolf_controller_utils::_xyz[i] , Kd(i,i)))
         {
-        RCLCPP_DEBUG(nh_->get_logger(), "No Kd.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_xyz[i].c_str(),_task_id.c_str(),robot_name_.c_str());
+        RCLCPP_DEBUG(task_nh_->get_logger(), "No Kd.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_xyz[i].c_str(),_task_id.c_str(),robot_name_.c_str());
         use_identity = true;
         }
         // Check if the values are positive
@@ -131,7 +131,7 @@ void ComImpl::publish()
     if (rt_pub_->trylock())
     {
         rt_pub_->msg_.header.frame_id = getBaseLink();
-        rt_pub_->msg_.header.stamp = nh_->now();
+        rt_pub_->msg_.header.stamp = task_nh_->now();
 
         getActualPose(tmp_vector3d_);
         wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.position_actual);

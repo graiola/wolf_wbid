@@ -35,14 +35,14 @@ void AngularMomentumImpl::loadParams()
 {
 
   double lambda1, weight;
-  if (!nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
+  if (!task_nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
   {
-    RCLCPP_DEBUG(nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
+    RCLCPP_DEBUG(task_nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     lambda1 = getLambda();
   }
-  if (!nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
+  if (!task_nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
   {
-    RCLCPP_DEBUG(nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
+    RCLCPP_DEBUG(task_nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
     weight = getWeight()(0,0);
   }
   // Check if the values are positive
@@ -61,15 +61,15 @@ void AngularMomentumImpl::loadParams()
   bool use_identity = false;
   for(unsigned int i=0; i<wolf_controller_utils::_rpy.size(); i++)
   {
-    if (!nh_->get_parameter("gains/"+_task_id+"/K/" + wolf_controller_utils::_rpy[i] , K(i,i)))
+    if (!task_nh_->get_parameter("gains/"+_task_id+"/K/" + wolf_controller_utils::_rpy[i] , K(i,i)))
     {
-      RCLCPP_DEBUG(nh_->get_logger(),"No Kp.%s gain given for task %s, using an identity matrix. ",wolf_controller_utils::_rpy[i].c_str(),_task_id.c_str());
+      RCLCPP_DEBUG(task_nh_->get_logger(),"No Kp.%s gain given for task %s, using an identity matrix. ",wolf_controller_utils::_rpy[i].c_str(),_task_id.c_str());
       use_identity = true;
     }
     // Check if the values are positive
     if(K(i,i)<0.0)
     {
-      RCLCPP_DEBUG(nh_->get_logger(),"K gain must be positive!");
+      RCLCPP_DEBUG(task_nh_->get_logger(),"K gain must be positive!");
       use_identity = true;
     }
   }
