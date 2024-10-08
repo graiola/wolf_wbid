@@ -353,6 +353,7 @@ double IDProblem::getFrictionConesMu() const
 
 void IDProblem::reset()
 {
+  // Reset Tasks
   for (auto& tmp_map : arms_)
   {
     tmp_map.second->update(Eigen::VectorXd(1));
@@ -372,6 +373,8 @@ void IDProblem::reset()
   waist_->reset();
   com_->update(Eigen::VectorXd(1));
   com_->reset();
+
+  change_control_mode_ = false;
 }
 
 void IDProblem::activateComZ(bool active)
