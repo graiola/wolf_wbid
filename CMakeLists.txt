@@ -64,9 +64,11 @@ if(${catkin_FOUND})
         id_problem
         task_wrappers
         OpenSoT
+        OpenSotBackEndQPOases
         XBotInterface
         XBotCoreModel
         ModelInterfaceRBDL
+        matlogger2
       CATKIN_DEPENDS
         wolf_msgs
         wolf_controller_utils
@@ -83,9 +85,11 @@ elseif(${ament_cmake_FOUND})
         id_problem
         task_wrappers
         OpenSoT
+        OpenSotBackEndQPOases
         XBotInterface
         XBotCoreModel
-        ModelInterfaceRBDL)
+        ModelInterfaceRBDL
+        matlogger2)
     ament_package()
     add_definitions(-DROS2)
     message(STATUS "Add ROS2 definition")
@@ -162,9 +166,11 @@ install(
     id_problem
     task_wrappers
     OpenSoT
+    OpenSotBackEndQPOases
     XBotInterface
     XBotCoreModel
     ModelInterfaceRBDL
+    matlogger2
   ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
   LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
   RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
