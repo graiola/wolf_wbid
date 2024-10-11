@@ -65,6 +65,7 @@ if(${catkin_FOUND})
         task_wrappers
         OpenSoT
         OpenSotBackEndQPOases
+        OpenSotBackEndeiQuadProg
         XBotInterface
         XBotCoreModel
         ModelInterfaceRBDL
@@ -86,6 +87,7 @@ elseif(${ament_cmake_FOUND})
         task_wrappers
         OpenSoT
         OpenSotBackEndQPOases
+        OpenSotBackEndeiQuadProg
         XBotInterface
         XBotCoreModel
         ModelInterfaceRBDL
@@ -167,6 +169,7 @@ install(
     task_wrappers
     OpenSoT
     OpenSotBackEndQPOases
+    OpenSotBackEndeiQuadProg
     XBotInterface
     XBotCoreModel
     ModelInterfaceRBDL
