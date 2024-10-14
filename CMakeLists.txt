@@ -55,9 +55,9 @@ if(${catkin_FOUND})
     catkin_package(
       INCLUDE_DIRS
         include
-        #third_party/XBotInterface/include
-        #third_party/ModelInterfaceRBDL/include
-        #third_party/OpenSoT/include
+        third_party/XBotInterface/include
+        third_party/ModelInterfaceRBDL/include
+        third_party/OpenSoT/include
       LIBRARIES
         quadruped_robot
         cartesian_trajectory
