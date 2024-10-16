@@ -77,9 +77,9 @@ void CartesianImpl::loadParams()
   // Example of parameter handling with ROS2 parameters
   double lambda1, lambda2, weight;
 
-  task_nh_->get_parameter_or("gains/" + _task_id + "/lambda1", lambda1, getLambda());
-  task_nh_->get_parameter_or("gains/" + _task_id + "/lambda2", lambda2, getLambda2());
-  task_nh_->get_parameter_or("gains/" + _task_id + "/weight", weight, getWeight()(0, 0));
+  task_nh_->get_parameter_or("gains." + _task_id + ".lambda1", lambda1, getLambda());
+  task_nh_->get_parameter_or("gains." + _task_id + ".lambda2", lambda2, getLambda2());
+  task_nh_->get_parameter_or("gains." + _task_id + ".weight", weight, getWeight()(0, 0));
 
   if (lambda1 < 0 || lambda2 < 0 || weight < 0)
     throw std::runtime_error("Lambda and weight must be positive!");
@@ -97,8 +97,8 @@ void CartesianImpl::loadParams()
   bool use_identity = false;
   for (unsigned int i = 0; i < wolf_controller_utils::_cartesian_names.size(); i++)
   {
-    std::string param_name_kp = "gains/" + _task_id + "/Kp/" + wolf_controller_utils::_cartesian_names[i];
-    std::string param_name_kd = "gains/" + _task_id + "/Kd/" + wolf_controller_utils::_cartesian_names[i];
+    std::string param_name_kp = "gains." + _task_id + ".Kp." + wolf_controller_utils::_cartesian_names[i];
+    std::string param_name_kd = "gains." + _task_id + ".Kd." + wolf_controller_utils::_cartesian_names[i];
 
     task_nh_->get_parameter_or(param_name_kp, Kp(i, i), 1.0); // Default to 1.0 if not set
     task_nh_->get_parameter_or(param_name_kd, Kd(i, i), 1.0);
