@@ -12,6 +12,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_eigen/tf2_eigen.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <wolf_controller_utils/ros2_param_getter.h>
 
 using namespace wolf_controller_utils;
 using namespace wolf_wbid;
@@ -70,18 +71,51 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
 void CartesianImpl::registerReconfigurableVariables()
 {
   // Register dynamic reconfigurable variables (adapt ROS2 Dynamic Parameters or alternative service approach)
+  double lambda1 = getLambda();
+  double lambda2 = getLambda2();
+  double weight  = getWeight()(0,0);
+  Eigen::Matrix6d Kp = getKp();
+  Eigen::Matrix6d Kd = getKd();
+
+  // Load the tmp variables used in _update
+  TaskWrapperInterface::setLambda1(lambda1);
+  TaskWrapperInterface::setLambda2(lambda2);
+  TaskWrapperInterface::setWeightDiag(weight);
+
+  TaskWrapperInterface::setKpX(Kp(0,0));
+  TaskWrapperInterface::setKpY(Kp(1,1));
+  TaskWrapperInterface::setKpZ(Kp(2,2));
+  TaskWrapperInterface::setKpRoll(Kp(3,3));
+  TaskWrapperInterface::setKpPitch(Kp(4,4));
+  TaskWrapperInterface::setKpYaw(Kp(5,5));
+
+  TaskWrapperInterface::setKdX(Kd(0,0));
+  TaskWrapperInterface::setKdY(Kd(1,1));
+  TaskWrapperInterface::setKdZ(Kd(2,2));
+  TaskWrapperInterface::setKdRoll(Kd(3,3));
+  TaskWrapperInterface::setKdPitch(Kd(4,4));
+  TaskWrapperInterface::setKdYaw(Kd(5,5));
 }
 
 void CartesianImpl::loadParams()
 {
   // Example of parameter handling with ROS2 parameters
   double lambda1, lambda2, weight;
+  lambda1 = getLambda();
+  lambda2 = getLambda2();
+  weight  = getWeight()(0, 0);
 
+<<<<<<< HEAD
   task_nh_->get_parameter_or("gains." + _task_id + ".lambda1", lambda1, getLambda());
   task_nh_->get_parameter_or("gains." + _task_id + ".lambda2", lambda2, getLambda2());
   task_nh_->get_parameter_or("gains." + _task_id + ".weight", weight, getWeight()(0, 0));
+=======
+  lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda1", lambda1);
+  lambda2 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda2", lambda2);
+  weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".weight",  weight);
+>>>>>>> fix_params
 
-  if (lambda1 < 0 || lambda2 < 0 || weight < 0)
+  if (lambda1 < 0.0 || lambda2 < 0.0 || weight < 0.0)
     throw std::runtime_error("Lambda and weight must be positive!");
 
   buffer_lambda1_ = lambda1;
@@ -97,14 +131,17 @@ void CartesianImpl::loadParams()
   bool use_identity = false;
   for (unsigned int i = 0; i < wolf_controller_utils::_cartesian_names.size(); i++)
   {
-    std::string param_name_kp = "gains." + _task_id + ".Kp." + wolf_controller_utils::_cartesian_names[i];
-    std::string param_name_kd = "gains." + _task_id + ".Kd." + wolf_controller_utils::_cartesian_names[i];
-
-    task_nh_->get_parameter_or(param_name_kp, Kp(i, i), 1.0); // Default to 1.0 if not set
-    task_nh_->get_parameter_or(param_name_kd, Kd(i, i), 1.0);
+    Kp(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + _task_id + ".Kp." + wolf_controller_utils::_cartesian_names[i], 0.0);
+    Kd(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + _task_id + ".Kd." + wolf_controller_utils::_cartesian_names[i], 0.0);
 
     if (Kp(i, i) < 0.0 || Kd(i, i) < 0.0)
-      throw std::runtime_error("Kp and Kd must be positive definite!");
+      use_identity = true;
+  }
+
+  if(use_identity)
+  {
+    Kp = Eigen::Matrix6d::Identity();
+    Kd = Eigen::Matrix6d::Identity();
   }
 
   setKp(Kp);

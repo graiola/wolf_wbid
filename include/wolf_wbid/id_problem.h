@@ -227,6 +227,14 @@ public:
      */
     void setJointAccelerationMinimizationWeight(double weight);
 
+
+    /** Get **/
+    const std::map<std::string,Cartesian::Ptr>& getFootTasks() const;
+    const std::map<std::string,Cartesian::Ptr>& getArmTasks() const;
+    const std::map<std::string,Wrench::Ptr>& getWrenchTasks() const;
+    const Cartesian::Ptr & getWaistTask() const;
+    const Com::Ptr & getComTask() const;
+
 private:
 
     bool _solve(const std::unique_ptr<OpenSoT::solvers::iHQP>& solver, Eigen::VectorXd& tau);
@@ -351,6 +359,7 @@ private:
      * @brief Flags and variables
      */
     std::atomic<unsigned int> control_mode_;
+    bool initialized_;
     bool activate_com_z_;
     bool activate_angular_momentum_;
     bool activate_postural_;

@@ -7,7 +7,9 @@
 
 // WoLF
 #include <wolf_wbid/task_ros2_wrappers/postural.h>
+#include <wolf_controller_utils/ros2_param_getter.h>
 
+using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
 PosturalImpl::PosturalImpl(const std::string& robot_name, const XBot::ModelInterface& robot,
@@ -31,32 +33,23 @@ void PosturalImpl::registerReconfigurableVariables()
   double lambda1 = getLambda();
   double lambda2 = getLambda2();
   double weight  = getWeight()(0,0);
-  //FIXME
-  /*ddr_server_->registerVariable<double>("set_lambda_1",    lambda1,     boost::bind(&TaskWrapperInterface::setLambda1,this,_1)    ,"set lambda 1"   ,0.0,1000.0);
-  ddr_server_->registerVariable<double>("set_lambda_2",    lambda2,     boost::bind(&TaskWrapperInterface::setLambda2,this,_1)    ,"set lambda 2"   ,0.0,1000.0);
-  ddr_server_->registerVariable<double>("set_weight_diag", weight,      boost::bind(&TaskWrapperInterface::setWeightDiag,this,_1) ,"set weight diag",0.0,1000.0);
-  ddr_server_->publishServicesTopics();*/
+
+  TaskWrapperInterface::setLambda1(lambda1);
+  TaskWrapperInterface::setLambda2(lambda2);
+  TaskWrapperInterface::setWeightDiag(weight);
 }
 
 void PosturalImpl::loadParams()
 {
 
-  double lambda1, lambda2, weight;
-  if (!task_nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
-  {
-    RCLCPP_DEBUG(task_nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
-    lambda1 = getLambda();
-  }
-  if (!task_nh_->get_parameter("gains/"+_task_id+"/lambda2" , lambda2))
-  {
-    RCLCPP_DEBUG(task_nh_->get_logger(),"No lambda2 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
-    lambda2 = getLambda2();
-  }
-  if (!task_nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
-  {
-    RCLCPP_DEBUG(task_nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
-    weight = getWeight()(0,0);
-  }
+  double lambda1 = getLambda();
+  double lambda2 = getLambda2();
+  double weight  = getWeight()(0, 0);
+
+  lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda1", lambda1);
+  lambda2 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda2", lambda2);
+  weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".weight",  weight);
+
   // Check if the values are positive
   if(lambda1 < 0 || lambda2 < 0 || weight < 0)
     throw std::runtime_error("Lambda and weight must be positive!");
