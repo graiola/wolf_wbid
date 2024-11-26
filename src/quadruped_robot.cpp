@@ -198,6 +198,7 @@ QuadrupedRobot::QuadrupedRobot(const std::string& robot_name, const std::string&
   if(!checkJointLimits(q_stand_down_))
     throw std::runtime_error("stand down joint positions are out of the limits! Check the SRDF file!");
 
+
   // Define default heights
   stand_up_height_ = 0.0;
   Eigen::Affine3d pose;

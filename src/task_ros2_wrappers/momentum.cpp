@@ -8,6 +8,9 @@
 // WoLF
 #include <wolf_wbid/task_ros2_wrappers/momentum.h>
 
+#include <wolf_controller_utils/ros2_param_getter.h>
+
+using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
 AngularMomentumImpl::AngularMomentumImpl(const std::string& robot_name, XBot::ModelInterface& robot, const OpenSoT::AffineHelper& qddot, const double& period)
@@ -20,31 +23,27 @@ void AngularMomentumImpl::registerReconfigurableVariables()
 {
   double lambda1 = getLambda();
   double weight  = getWeight()(0,0);
-
-  // FIXME
-  /*ddr_server_->registerVariable<double>("set_lambda_1",    lambda1,     boost::bind(&TaskWrapperInterface::setLambda1,this,_1)    ,"set lambda 1"   ,0.0,1000.0);
-  ddr_server_->registerVariable<double>("set_weight_diag", weight,      boost::bind(&TaskWrapperInterface::setWeightDiag,this,_1) ,"set weight diag",0.0,1000.0);
   Eigen::Matrix3d K = getMomentumGain();
-  ddr_server_->registerVariable<double>("K_roll",    K(0,0), boost::bind(&TaskWrapperInterface::setKpRoll, this,_1)    ,"K(0,0)", 0.0, 1000.0);
-  ddr_server_->registerVariable<double>("K_pitch",   K(1,1), boost::bind(&TaskWrapperInterface::setKpPitch,this,_1)    ,"K(1,1)", 0.0, 1000.0);
-  ddr_server_->registerVariable<double>("K_yaw",     K(2,2), boost::bind(&TaskWrapperInterface::setKpYaw,  this,_1)    ,"K(2,2)", 0.0, 1000.0);
-  ddr_server_->publishServicesTopics();*/
+
+  // Load the tmp variables used in _update
+  TaskWrapperInterface::setLambda1(lambda1);
+  TaskWrapperInterface::setWeightDiag(weight);
+
+  TaskWrapperInterface::setKpRoll(K(0,0));
+  TaskWrapperInterface::setKpPitch(K(1,1));
+  TaskWrapperInterface::setKpYaw(K(2,2));
+
 }
 
 void AngularMomentumImpl::loadParams()
 {
 
-  double lambda1, weight;
-  if (!task_nh_->get_parameter("gains/"+_task_id+"/lambda1" , lambda1))
-  {
-    RCLCPP_DEBUG(task_nh_->get_logger(),"No lambda1 gain given for task %s, using the default value loaded from the task",_task_id.c_str());
-    lambda1 = getLambda();
-  }
-  if (!task_nh_->get_parameter("gains/"+_task_id+"/weight" , weight))
-  {
-    RCLCPP_DEBUG(task_nh_->get_logger(),"No weight gain given for task %s, using the default value loaded from the task",_task_id.c_str());
-    weight = getWeight()(0,0);
-  }
+  double lambda1 = getLambda();
+  double weight  = getWeight()(0, 0);
+
+  lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda1", lambda1);
+  weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".weight",  weight);
+
   // Check if the values are positive
   if(lambda1 < 0 || weight < 0)
     throw std::runtime_error("Lambda and weight must be positive!");
@@ -61,17 +60,11 @@ void AngularMomentumImpl::loadParams()
   bool use_identity = false;
   for(unsigned int i=0; i<wolf_controller_utils::_rpy.size(); i++)
   {
-    if (!task_nh_->get_parameter("gains/"+_task_id+"/K/" + wolf_controller_utils::_rpy[i] , K(i,i)))
-    {
-      RCLCPP_DEBUG(task_nh_->get_logger(),"No Kp.%s gain given for task %s, using an identity matrix. ",wolf_controller_utils::_rpy[i].c_str(),_task_id.c_str());
-      use_identity = true;
-    }
-    // Check if the values are positive
+
+    K(i,i) = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".K." + wolf_controller_utils::_rpy[i], K(i,i));
+
     if(K(i,i)<0.0)
-    {
-      RCLCPP_DEBUG(task_nh_->get_logger(),"K gain must be positive!");
       use_identity = true;
-    }
   }
 
   if(use_identity)

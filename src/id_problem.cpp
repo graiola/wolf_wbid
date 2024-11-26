@@ -30,6 +30,7 @@ namespace wolf_wbid {
 IDProblem::IDProblem(QuadrupedRobot::Ptr model):
   model_(model),
   control_mode_(WPG),
+  initialized_(false),
   activate_com_z_(true),
   activate_angular_momentum_(true),
   activate_postural_(false),
@@ -51,6 +52,9 @@ IDProblem::~IDProblem()
 void IDProblem::init(const std::string& robot_name, const double& dt)
 {
 
+  if(initialized_)
+    return;
+
   //
   //  This utility internally creates the right variables which later we will use to
   //  create all the tasks and constraints
@@ -63,7 +67,6 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   //   --------------------------
   for(unsigned int i=0; i<foot_names_.size(); i++)
   {
-
     feet_[foot_names_[i]] = std::make_shared<CartesianImpl>(robot_name,foot_names_[i], *model_, foot_names_[i],
                                                             WORLD_FRAME_NAME, id_->getJointsAccelerationAffine(),dt);
     feet_[foot_names_[i]]->setLambda(0.,0.);
@@ -338,6 +341,9 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   //,OpenSoT::solvers::wpg_solver_back_ends::proxQP    );
 
   PRINT_INFO_NAMED(CLASS_NAME,"Solver created");
+
+
+  initialized_ = true;
 }
 
 void IDProblem::setFrictionConesMu(const double& mu)
@@ -419,6 +425,31 @@ void IDProblem::setJointAccelerationMinimizationWeight(double weight)
     min_qddot_weight_ = weight;
   else
     PRINT_WARN_NAMED(CLASS_NAME,"Weight value has to be greater equal than 0!");
+}
+
+const std::map<string, Cartesian::Ptr> &IDProblem::getFootTasks() const
+{
+  return feet_;
+}
+
+const std::map<string, Cartesian::Ptr> &IDProblem::getArmTasks() const
+{
+  return arms_;
+}
+
+const std::map<string, Wrench::Ptr> &IDProblem::getWrenchTasks() const
+{
+  return wrenches_;
+}
+
+const Cartesian::Ptr &IDProblem::getWaistTask() const
+{
+  return waist_;
+}
+
+const Com::Ptr &IDProblem::getComTask() const
+{
+  return com_;
 }
 
 void IDProblem::setFrictionConesR(const Eigen::Matrix3d& R)

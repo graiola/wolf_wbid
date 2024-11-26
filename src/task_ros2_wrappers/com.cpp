@@ -7,7 +7,9 @@
 
 // WoLF
 #include <wolf_wbid/task_ros2_wrappers/com.h>
+#include <wolf_controller_utils/ros2_param_getter.h>
 
+using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
 ComImpl::ComImpl(const std::string& robot_name,
@@ -32,44 +34,32 @@ void ComImpl::registerReconfigurableVariables()
     double lambda1 = getLambda();
     double lambda2 = getLambda2();
     double weight  = getWeight()(0,0);
-
-    // FIXME
-    /*ddr_server_->register_variable("set_lambda_1", lambda1, [this](double val) { setLambda1(val); }, "set lambda 1", 0.0, 1000.0);
-    ddr_server_->register_variable("set_lambda_2", lambda2, [this](double val) { setLambda2(val); }, "set lambda 2", 0.0, 1000.0);
-    ddr_server_->register_variable("set_weight_diag", weight, [this](double val) { setWeightDiag(val); }, "set weight diag", 0.0, 1000.0);
-
     Eigen::Matrix3d Kp = getKp();
-    ddr_server_->register_variable("kp_x", Kp(0,0), [this](double val) { setKpX(val); }, "Kp(0,0)", 0.0, 10000.0);
-    ddr_server_->register_variable("kp_y", Kp(1,1), [this](double val) { setKpY(val); }, "Kp(1,1)", 0.0, 10000.0);
-    ddr_server_->register_variable("kp_z", Kp(2,2), [this](double val) { setKpZ(val); }, "Kp(2,2)", 0.0, 10000.0);
-
     Eigen::Matrix3d Kd = getKd();
-    ddr_server_->register_variable("kd_x", Kd(0,0), [this](double val) { setKdX(val); }, "Kd(0,0)", 0.0, 10000.0);
-    ddr_server_->register_variable("kd_y", Kd(1,1), [this](double val) { setKdY(val); }, "Kd(1,1)", 0.0, 10000.0);
-    ddr_server_->register_variable("kd_z", Kd(2,2), [this](double val) { setKdZ(val); }, "Kd(2,2)", 0.0, 10000.0);
 
-    ddr_server_->publish_services_topics();*/
+    TaskWrapperInterface::setLambda1(lambda1);
+    TaskWrapperInterface::setLambda2(lambda2);
+    TaskWrapperInterface::setWeightDiag(weight);
+
+    TaskWrapperInterface::setKpX(Kp(0,0));
+    TaskWrapperInterface::setKpY(Kp(1,1));
+    TaskWrapperInterface::setKpZ(Kp(2,2));
+
+    TaskWrapperInterface::setKdX(Kd(0,0));
+    TaskWrapperInterface::setKdY(Kd(1,1));
+    TaskWrapperInterface::setKdZ(Kd(2,2));
 }
 
 void ComImpl::loadParams()
 {
-    double lambda1, lambda2, weight;
+    double lambda1 = getLambda();
+    double lambda2 = getLambda2();
+    double weight  = getWeight()(0, 0);
 
-    if (!task_nh_->get_parameter("gains/" + _task_id + "/lambda1", lambda1))
-    {
-        RCLCPP_DEBUG(task_nh_->get_logger(), "No lambda1 gain given for task %s, using default value.", _task_id.c_str());
-        lambda1 = getLambda();
-    }
-    if (!task_nh_->get_parameter("gains/" + _task_id + "/lambda2", lambda2))
-    {
-        RCLCPP_DEBUG(task_nh_->get_logger(), "No lambda2 gain given for task %s, using default value.", _task_id.c_str());
-        lambda2 = getLambda2();
-    }
-    if (!task_nh_->get_parameter("gains/" + _task_id + "/weight", weight))
-    {
-        RCLCPP_DEBUG(task_nh_->get_logger(), "No weight gain given for task %s, using default value.", _task_id.c_str());
-        weight = getWeight()(0,0);
-    }
+    lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda1", lambda1);
+    lambda2 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda2", lambda2);
+    weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".weight",  weight);
+
 
     if(lambda1 < 0 || lambda2 < 0 || weight < 0)
         throw std::runtime_error("Lambda and weight must be positive!");
@@ -87,20 +77,13 @@ void ComImpl::loadParams()
 
     for(unsigned int i=0; i<wolf_controller_utils::_xyz.size(); i++)
     {
-        if (!task_nh_->get_parameter("gains/"+_task_id+"/Kp/" + wolf_controller_utils::_xyz[i] , Kp(i,i)))
-        {
-        RCLCPP_DEBUG(task_nh_->get_logger(), "No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_xyz[i].c_str(),_task_id.c_str(),robot_name_.c_str());
-        use_identity = true;
-        }
-        if (!task_nh_->get_parameter("gains/"+_task_id+"/Kd/"  + wolf_controller_utils::_xyz[i] , Kd(i,i)))
-        {
-        RCLCPP_DEBUG(task_nh_->get_logger(), "No Kd.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_xyz[i].c_str(),_task_id.c_str(),robot_name_.c_str());
-        use_identity = true;
-        }
+
+        Kp(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + _task_id + ".Kp." + wolf_controller_utils::_xyz[i], 0.0);
+        Kd(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + _task_id + ".Kd." + wolf_controller_utils::_xyz[i], 0.0);
+
         // Check if the values are positive
         if(Kp(i,i)<0.0 || Kd(i,i)<0.0)
-        throw std::runtime_error("Kp and Kd must be positive definite!");
-
+          use_identity = true;
     }
 
     if(use_identity)
