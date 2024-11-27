@@ -105,15 +105,9 @@ void CartesianImpl::loadParams()
   lambda2 = getLambda2();
   weight  = getWeight()(0, 0);
 
-<<<<<<< HEAD
-  task_nh_->get_parameter_or("gains." + _task_id + ".lambda1", lambda1, getLambda());
-  task_nh_->get_parameter_or("gains." + _task_id + ".lambda2", lambda2, getLambda2());
-  task_nh_->get_parameter_or("gains." + _task_id + ".weight", weight, getWeight()(0, 0));
-=======
   lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda1", lambda1);
   lambda2 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda2", lambda2);
   weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".weight",  weight);
->>>>>>> fix_params
 
   if (lambda1 < 0.0 || lambda2 < 0.0 || weight < 0.0)
     throw std::runtime_error("Lambda and weight must be positive!");
