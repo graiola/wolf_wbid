@@ -68,6 +68,8 @@ option(OPENSOT_COMPILE_TESTS "Compile OpenSoT tests" FALSE)
 option(OPENSOT_VERBOSE "Some additional prints" FALSE)
 option(OPENSOT_VERBOSE_MATLOG "Log all aggregated tasks/constraints to MAT-file" FALSE)
 option(OPENSOT_DISABLE_VECTORIZATION "Disable Eigen3 vectorization" FALSE)
+option(OPENSOT_COMPILE_COLLISION "Compile Collision Avoidance" FALSE)
+option(OPENSOT_CONVEX_HULL_UTILS "Compile Convex Hull utils" FALSE)
 
 if(${OPENSOT_DISABLE_VECTORIZATION})
     add_definitions(-DEIGEN_DONT_VECTORIZE)
@@ -123,7 +125,7 @@ if(${PCL_FOUND} AND ${moveit_core_FOUND})
         src/constraints/velocity/ConvexHull.cpp)
 endif()
 
-if(${FCL_FOUND} AND ${moveit_core_FOUND})
+if(${OPENSOT_COMPILE_COLLISION} AND ${FCL_FOUND} AND ${moveit_core_FOUND})
     message("Adding src/constraints/velocity/SelfCollisionAvoidance.cpp to compilation")
     set(OPENSOT_CONSTRAINTS_SOURCES ${OPENSOT_CONSTRAINTS_SOURCES}
         src/constraints/velocity/CollisionAvoidance.cpp)
@@ -189,13 +191,13 @@ set(OPENSOT_UTILS_SOURCES src/utils/AutoStack.cpp
     src/utils/ForceOptimization.cpp
     src/utils/InverseDynamics.cpp)
 
-if(${FCL_FOUND} AND ${moveit_core_FOUND})
+if(${OPENSOT_COMPILE_COLLISION} AND ${FCL_FOUND} AND ${moveit_core_FOUND})
     message("Adding src/utils/collision_utils.cpp to compilation")
     set(OPENSOT_UTILS_SOURCES ${OPENSOT_UTILS_SOURCES}
         src/utils/collision_utils.cpp)
 endif()
 
-if(${PCL_FOUND})
+if(${OPENSOT_CONVEX_HULL_UTILS} AND ${PCL_FOUND})
     message("Adding src/utils/convex_hull_utils.cpp to compilation")
     set(OPENSOT_UTILS_SOURCES ${OPENSOT_UTILS_SOURCES}
         src/utils/convex_hull_utils.cpp)
