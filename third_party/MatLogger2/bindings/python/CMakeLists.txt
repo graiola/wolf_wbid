@@ -5,10 +5,12 @@ find_package(pybind11 QUIET)
 add_compile_options(-std=c++14)
 
 if(${pybind11_FOUND})
+
+    find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
     
     message(STATUS "Will compile python bindings")
     include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-    pybind11_add_module(matlogger pyMatLogger2.cpp)
+    pybind11_add_module(matlogger MODULE pyMatLogger2.cpp)
     target_link_libraries(matlogger PUBLIC matlogger2)
 
     
