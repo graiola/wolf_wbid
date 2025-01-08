@@ -20,10 +20,12 @@ endif()
 
 find_package(Eigen3 REQUIRED)
 find_package(tf2 REQUIRED)
-find_package(realtime_tools REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_eigen REQUIRED)
 find_package(wolf_msgs REQUIRED)
 find_package(wolf_controller_utils REQUIRED)
 find_package(interactive_markers REQUIRED)
+find_package(realtime_tools REQUIRED)
 
 include_directories(
     include
@@ -34,6 +36,8 @@ include_directories(
     third_party/OpenSoT/include
     ${EIGEN3_INCLUDE_DIRS}
     ${tf2_INCLUDE_DIRS}
+    ${tf2_ros_INCLUDE_DIRS}
+    ${tf2_eigen_INCLUDE_DIRS}
     ${realtime_tools_INCLUDE_DIRS}
     ${wolf_msgs_INCLUDE_DIRS}
     ${wolf_controller_utils_INCLUDE_DIRS}
@@ -74,12 +78,14 @@ if(${catkin_FOUND})
         wolf_msgs
         wolf_controller_utils
         interactive_markers
+        realtime_tools
     )
     add_definitions(-DROS)
     message(STATUS "Add ROS definition")
 elseif(${ament_cmake_FOUND})
     set(TASK_WRAPPERS_FOLDER "task_ros2_wrappers")
     ament_export_include_directories(include)
+    ament_export_dependencies(wolf_msgs wolf_controller_utils interactive_markers realtime_tools)
     ament_export_libraries(
         quadruped_robot
         cartesian_trajectory
@@ -124,7 +130,9 @@ target_link_libraries(task_wrappers
     cartesian_trajectory 
     quadruped_robot
     ${tf2_LIBRARIES}
-    ${realtime_tools_conversions_LIBRARIES}
+    ${tf2_ros_LIBRARIES}
+    ${tf2_eigen_LIBRARIES}
+    ${realtime_tools_LIBRARIES}
     ${wolf_controller_utils_LIBRARIES}
     ${wolf_msgs_LIBRARIES}
     ${interactive_markers_LIBRARIES}

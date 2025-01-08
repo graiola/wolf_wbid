@@ -11,13 +11,14 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 #define TASK_ROS2_WRAPPERS_CARTESIAN_H
 
 // ROS2
-#include <interactive_markers/menu_handler.hpp>
 #include <urdf/model.h>
 #include <std_srvs/srv/empty.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
+#include <interactive_markers/menu_handler.hpp>
+#include <interactive_markers/interactive_marker_server.hpp>
 
 // WoLF
 #include <wolf_wbid/task_ros2_wrappers/handler.h>

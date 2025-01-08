@@ -13,7 +13,6 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 // ROS2
 #include <rclcpp/rclcpp.hpp>
 //#include <ddynamic_reconfigure/ddynamic_reconfigure.hpp>
-#include <interactive_markers/interactive_marker_server.hpp>
 #include <realtime_tools/realtime_publisher.h>
 #include <realtime_tools/realtime_buffer.h>
 
