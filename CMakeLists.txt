@@ -29,6 +29,9 @@ find_package(realtime_tools REQUIRED)
 
 include_directories(
     include
+    /opt/ros/$ENV{ROS_DISTRO}/include/kdl_parser/  # FIX FOR ROS HUMBLE
+    /opt/ros/$ENV{ROS_DISTRO}/include/realtime_tools/ # FIX FOR ROS HUMBLE
+    /opt/ros/$ENV{ROS_DISTRO}/include/interactive_markers/ # FIX FOR ROS HUMBLE
     third_party/MatLogger2/include
     third_party/XBotInterface/include
     third_party/XBotInterface/srdfdom_advr/include

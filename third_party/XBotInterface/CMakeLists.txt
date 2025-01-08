@@ -33,12 +33,20 @@ include(MacroOptionalBuild)
 include(MacroInstallLib)
 
 # find dependencies
+find_package(kdl_parser REQUIRED)
 find_package(urdfdom REQUIRED)
 find_package(urdf REQUIRED)
 find_package(Boost REQUIRED)
-find_package(kdl_parser REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(orocos_kdl REQUIRED)
+
+#include_directories(include
+#                    ${EIGEN3_INCLUDE_DIRS}
+#                    ${kdl_parser_INCLUDE_DIRS}
+#                    ${urdfdom_INCLUDE_DIRS}
+#                    ${urdf_INCLUDE_DIRS}
+#                    ${Boost_INCLUDE_DIRS}
+#                    ${orocos_kdl_INCLUDE_DIRS})
 
 # define SOVERSION
 set(${PROJECT_NAME}_SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
@@ -66,11 +74,11 @@ add_library(XBotInterface SHARED
     src/bprinter/table_printer.cpp
     )
 
-
 target_include_directories(XBotInterface
     PUBLIC
     ${EIGEN3_INCLUDE_DIRS}
     ${orocos_kdl_INCLUDE_DIRS}
+    ${kdl_parser_INCLUDE_DIRS}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     )
 
@@ -118,7 +126,6 @@ target_include_directories(XBotCoreModel
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/srdfdom_advr/include>
     )
-
 set_target_properties(XBotCoreModel PROPERTIES
     SOVERSION ${${PROJECT_NAME}_SOVERSION})
 

@@ -119,7 +119,7 @@ set(OPENSOT_CONSTRAINTS_SOURCES src/constraints/Aggregated.cpp
     src/constraints/acceleration/JointLimitsECBF.cpp
     )
 
-if(${PCL_FOUND} AND ${moveit_core_FOUND})
+if(${OPENSOT_CONVEX_HULL_UTILS} AND ${PCL_FOUND} AND ${moveit_core_FOUND})
     message("Adding src/constraints/velocity/ConvexHull.cpp to compilation")
     set(OPENSOT_CONSTRAINTS_SOURCES ${OPENSOT_CONSTRAINTS_SOURCES}
         src/constraints/velocity/ConvexHull.cpp)
@@ -216,7 +216,8 @@ ADD_LIBRARY(OpenSoT SHARED
 
 if(${FCL_FOUND} AND ${moveit_core_FOUND})
     set(PRIVATE_TLL ${PRIVATE_TLL} fcl
-        ${moveit_core_LIBRARIES})
+        #${moveit_core_LIBRARIES}
+        )
 endif()
 if(${PCL_FOUND})
     set(PRIVATE_TLL ${PRIVATE_TLL} ${QHULL_LIBRARIES} ${PCL_LIBRARIES})
