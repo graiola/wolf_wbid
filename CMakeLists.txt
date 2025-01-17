@@ -32,6 +32,8 @@ include_directories(
     /opt/ros/$ENV{ROS_DISTRO}/include/kdl_parser/  # FIX FOR ROS HUMBLE
     /opt/ros/$ENV{ROS_DISTRO}/include/realtime_tools/ # FIX FOR ROS HUMBLE
     /opt/ros/$ENV{ROS_DISTRO}/include/interactive_markers/ # FIX FOR ROS HUMBLE
+    third_party/rbdl/include
+    third_party/
     third_party/MatLogger2/include
     third_party/XBotInterface/include
     third_party/XBotInterface/srdfdom_advr/include
@@ -49,6 +51,7 @@ include_directories(
 
 # ADVR Packages
 # Include ADVR packages as subdirectories
+add_subdirectory(third_party/rbdl)
 add_subdirectory(third_party/MatLogger2)
 add_subdirectory(third_party/XBotInterface)
 add_subdirectory(third_party/ModelInterfaceRBDL)
@@ -62,6 +65,8 @@ if(${catkin_FOUND})
     catkin_package(
       INCLUDE_DIRS
         include
+        third_party/rbdl/include
+        third_party/
         third_party/XBotInterface/include
         third_party/ModelInterfaceRBDL/include
         third_party/OpenSoT/include
@@ -70,6 +75,8 @@ if(${catkin_FOUND})
         cartesian_trajectory
         id_problem
         task_wrappers
+        rbdl
+        rbdl_urdfreader
         OpenSoT
         OpenSotBackEndQPOases
         OpenSotBackEndeiQuadProg
@@ -94,6 +101,8 @@ elseif(${ament_cmake_FOUND})
         cartesian_trajectory
         id_problem
         task_wrappers
+        rbdl
+        rbdl_urdfreader
         OpenSoT
         OpenSotBackEndQPOases
         OpenSotBackEndeiQuadProg
@@ -174,6 +183,8 @@ install(
 
 install(
   TARGETS
+    rbdl
+    rbdl_urdfreader
     quadruped_robot
     cartesian_trajectory
     id_problem
