@@ -49,6 +49,8 @@ include_directories(
     ${interactive_markers_INCLUDE_DIRS}
 )
 
+link_directories(/opt/ros/$ENV{ROS_DISTRO}/lib/) # FIX FOR ROS HUMBLE
+
 # ADVR Packages
 # Include ADVR packages as subdirectories
 add_subdirectory(third_party/rbdl)
@@ -89,13 +91,14 @@ if(${catkin_FOUND})
         wolf_controller_utils
         interactive_markers
         realtime_tools
+        kdl_parser
     )
     add_definitions(-DROS)
     message(STATUS "Add ROS definition")
 elseif(${ament_cmake_FOUND})
     set(TASK_WRAPPERS_FOLDER "task_ros2_wrappers")
     ament_export_include_directories(include)
-    ament_export_dependencies(wolf_msgs wolf_controller_utils interactive_markers realtime_tools)
+    ament_export_dependencies(wolf_msgs wolf_controller_utils interactive_markers realtime_tools kdl_parser)
     ament_export_libraries(
         quadruped_robot
         cartesian_trajectory
@@ -151,7 +154,10 @@ target_link_libraries(task_wrappers
     OpenSoT
     XBotInterface
     XBotCoreModel
-    ModelInterfaceRBDL)
+    ModelInterfaceRBDL
+    interactive_markers # FIX FOR ROS HUMBLE
+    realtime_tools # FIX FOR ROS HUMBLE
+    )
 
 add_library(id_problem SHARED src/id_problem.cpp)
 target_link_libraries(id_problem

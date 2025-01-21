@@ -48,6 +48,8 @@ find_package(orocos_kdl REQUIRED)
 #                    ${Boost_INCLUDE_DIRS}
 #                    ${orocos_kdl_INCLUDE_DIRS})
 
+link_directories(/usr/lib/x86_64-linux-gnu/) # FIX FOR ROS HUMBLE
+
 # define SOVERSION
 set(${PROJECT_NAME}_SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
 
@@ -114,9 +116,11 @@ target_link_libraries(XBotCoreModel
     PUBLIC
     yaml-cpp
     srdfdom_advr
+    ${urdf_LIBRARIES}
     ${urdfdom_LIBRARIES}
     ${Boost_LIBRARIES}
     ${kdl_parser_LIBRARIES}
+    kdl_parser # FIX FOR ROS HUMBLE
     )
 
 target_include_directories(XBotCoreModel
