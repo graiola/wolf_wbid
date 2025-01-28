@@ -35,7 +35,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 # Options
 option(MATLOGGER2_VERBOSE "Enable debug prints" OFF)
-option(COMPILE_PY_BINDINGS "Compile Python bindings" TRUE)
+option(COMPILE_PY_BINDINGS "Compile Python bindings" FALSE)
 option(GEN_DEB "Generate .deb" TRUE)
 option(GEN_DOCS "Generate docs" TRUE)
 option(BUILD_TESTS "Compile ${PROJECT_NAME} tests" FALSE)
