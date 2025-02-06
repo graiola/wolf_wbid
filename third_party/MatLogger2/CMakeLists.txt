@@ -58,7 +58,7 @@ include_directories(
 add_subdirectory(matio/) # matio backend library
 
 if(COMPILE_PY_BINDINGS)
-  add_subdirectory(bindings/python/) # python bindings
+  #add_subdirectory(bindings/python/) # python bindings
 endif()
 
 if(GEN_DOCS)
