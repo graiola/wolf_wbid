@@ -35,7 +35,7 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
              use_mesh)
   ,TaskRosHandler<wolf_msgs::msg::CartesianTask>(task_id,robot_name,period)
   ,is_continuous_(true)
-  ,marker_name_(robot_name+"/wolf_controller/marker/"+_task_id)
+  ,marker_name_("wolf_controller/marker/"+_task_id)
   ,interactive_marker_server_(marker_name_,task_nh_)
   ,use_mesh_(use_mesh)
 {
