@@ -139,7 +139,7 @@ private:
    */
   std::string marker_name_;
   visualization_msgs::msg::InteractiveMarker interactive_marker_;
-  interactive_markers::InteractiveMarkerServer interactive_marker_server_;
+  std::shared_ptr<interactive_markers::InteractiveMarkerServer> interactive_marker_server_;
   visualization_msgs::msg::Marker marker_;
   interactive_markers::MenuHandler menu_handler_;
   interactive_markers::MenuHandler::EntryHandle reset_marker_entry_;
@@ -153,6 +153,7 @@ private:
   interactive_markers::MenuHandler::EntryHandle continuous_control_entry_;
   visualization_msgs::msg::InteractiveMarkerControl menu_control_;
   std::map<std::string, interactive_markers::MenuHandler::EntryHandle> map_link_entries_;
+  bool enable_marker_;
 
   /**
    * @brief urdf_ model description of the robot

@@ -36,8 +36,8 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
   ,TaskRosHandler<wolf_msgs::msg::CartesianTask>(task_id,robot_name,period)
   ,is_continuous_(true)
   ,marker_name_("wolf_controller/marker/"+_task_id)
-  ,interactive_marker_server_(marker_name_,task_nh_)
   ,use_mesh_(use_mesh)
+  ,enable_marker_(false)
 {
   // Get the URDF
   urdf_ = robot.getUrdf();
@@ -52,10 +52,13 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
   buffer_reference_twist_.initRT(tmp_vector6d_);
 
   // Create the marker
-  control_type_ = visualization_msgs::msg::InteractiveMarkerControl::MOVE_ROTATE_3D;
-  makeMarker(getDistalLink(),getBaseLink(),static_cast<unsigned int>(control_type_),true);
-  makeMenu();
-  interactive_marker_server_.applyChanges();
+  if (enable_marker_) {
+    interactive_marker_server_ = std::make_shared<interactive_markers::InteractiveMarkerServer>(marker_name_,task_nh_);
+    control_type_ = visualization_msgs::msg::InteractiveMarkerControl::MOVE_ROTATE_3D;
+    makeMarker(getDistalLink(),getBaseLink(),static_cast<unsigned int>(control_type_),true);
+    makeMenu();
+    interactive_marker_server_->applyChanges();
+  }
 
   // Setup the interpolator
   trj_ = std::make_shared<CartesianTrajectory>(this);
@@ -223,9 +226,12 @@ void CartesianImpl::publish()
 bool CartesianImpl::reset()
 {
   bool res = OpenSoT::tasks::acceleration::Cartesian::reset(); // Task's reset
-  makeMarker(getDistalLink(), getBaseLink(), static_cast<unsigned int>(control_type_), true);
-  menu_handler_.apply(interactive_marker_server_,marker_name_);
-  interactive_marker_server_.applyChanges();
+  if (enable_marker_)
+  {
+    makeMarker(getDistalLink(), getBaseLink(), static_cast<unsigned int>(control_type_), true);
+    menu_handler_.apply(*interactive_marker_server_,marker_name_);
+    interactive_marker_server_->applyChanges();
+  }
   waypoints_.clear();
   publishWP(waypoints_);
   trj_->reset();
@@ -239,6 +245,7 @@ bool CartesianImpl::reset()
 
 void CartesianImpl::makeMarker(const std::string &distal_link, const std::string &base_link, unsigned int interaction_mode, bool show)
 {
+
   RCLCPP_DEBUG(rclcpp::get_logger("cartesian_impl"), "Creating marker %s -> %s", base_link.c_str(), distal_link.c_str());
 
   interactive_marker_.header.frame_id = base_link;
@@ -263,7 +270,7 @@ void CartesianImpl::makeMarker(const std::string &distal_link, const std::string
   affine3dToVisualizationPose(start_pose, interactive_marker_);
 
   // Use std::bind instead of boost::bind
-  interactive_marker_server_.insert(interactive_marker_, std::bind(&CartesianImpl::processFeedback, this, std::placeholders::_1));
+  interactive_marker_server_->insert(interactive_marker_, std::bind(&CartesianImpl::processFeedback, this, std::placeholders::_1));
 }
 
 void CartesianImpl::createInteractiveMarkerControl(const double qw, const double qx, const double qy, const double qz,
@@ -449,7 +456,7 @@ void CartesianImpl::makeMenu()
   menu_control_.always_visible = true;
 
   interactive_marker_.controls.push_back(menu_control_);
-  menu_handler_.apply(interactive_marker_server_, interactive_marker_.name);
+  menu_handler_.apply(*interactive_marker_server_, interactive_marker_.name);
 }
 
 
@@ -562,11 +569,11 @@ void CartesianImpl::resetLastWayPoints(const visualization_msgs::msg::Interactiv
     spawnMarker(); // Spawn if no waypoints left
   } else {
     // Handle remaining waypoints
-    if (interactive_marker_server_.empty()) {
+    if (interactive_marker_server_->empty()) {
       poseToVisualizationPose(waypoints_.back(), interactive_marker_); // Convert to visualization pose
-      interactive_marker_server_.insert(interactive_marker_, std::bind(&CartesianImpl::processFeedback, this, std::placeholders::_1)); // Use std::bind
-      menu_handler_.reApply(interactive_marker_server_);
-      interactive_marker_server_.applyChanges(); // Apply changes
+      interactive_marker_server_->insert(interactive_marker_, std::bind(&CartesianImpl::processFeedback, this, std::placeholders::_1)); // Use std::bind
+      menu_handler_.reApply(*interactive_marker_server_);
+      interactive_marker_server_->applyChanges(); // Apply changes
     }
   }
 
@@ -622,22 +629,22 @@ void CartesianImpl::publishWP(const std::vector<geometry_msgs::msg::Pose>& wps)
 
 bool CartesianImpl::clearMarker()
 {
-  if (!interactive_marker_server_.empty()) {
-    interactive_marker_server_.erase(interactive_marker_.name); // Erase marker from server
-    interactive_marker_server_.applyChanges(); // Apply changes to server
+  if (!interactive_marker_server_->empty()) {
+    interactive_marker_server_->erase(interactive_marker_.name); // Erase marker from server
+    interactive_marker_server_->applyChanges(); // Apply changes to server
   }
   return true;
 }
 
 bool CartesianImpl::spawnMarker()
 {
-  if (interactive_marker_server_.empty()) {
+  if (interactive_marker_server_->empty()) {
     Eigen::Affine3d start_pose;
     getActualPose(start_pose); // Get current pose
     affine3dToVisualizationPose(start_pose, interactive_marker_); // Convert pose for visualization
-    interactive_marker_server_.insert(interactive_marker_, std::bind(&CartesianImpl::processFeedback, this, std::placeholders::_1)); // Insert marker with std::bind
-    menu_handler_.reApply(interactive_marker_server_); // Reapply menu handler
-    interactive_marker_server_.applyChanges(); // Apply changes to the server
+    interactive_marker_server_->insert(interactive_marker_, std::bind(&CartesianImpl::processFeedback, this, std::placeholders::_1)); // Insert marker with std::bind
+    menu_handler_.reApply(*interactive_marker_server_); // Reapply menu handler
+    interactive_marker_server_->applyChanges(); // Apply changes to the server
   }
   return true;
 }
@@ -670,8 +677,8 @@ void CartesianImpl::setContinuousCtrl(const visualization_msgs::msg::Interactive
   spawnMarker(); // Spawn new marker
   publishWP(waypoints_); // Publish waypoints
 
-  menu_handler_.reApply(interactive_marker_server_); // Reapply menu handler
-  interactive_marker_server_.applyChanges(); // Apply changes to the server
+  menu_handler_.reApply(*interactive_marker_server_); // Reapply menu handler
+  interactive_marker_server_->applyChanges(); // Apply changes to the server
 }
 
 void CartesianImpl::changeBaseLink(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr& feedback, std::string new_base_link)
@@ -702,8 +709,8 @@ void CartesianImpl::changeBaseLink(const visualization_msgs::msg::InteractiveMar
     }
 
     // Apply the changes to the menu handler and the interactive marker server
-    menu_handler_.reApply(interactive_marker_server_);
-    interactive_marker_server_.applyChanges();
+    menu_handler_.reApply(*interactive_marker_server_);
+    interactive_marker_server_->applyChanges();
   }
 }
 
