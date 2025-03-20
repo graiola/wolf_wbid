@@ -69,7 +69,9 @@ if(${catkin_FOUND})
         include
         third_party/rbdl/include
         third_party/
+        third_party/MatLogger2/include
         third_party/XBotInterface/include
+        third_party/XBotInterface/srdfdom_advr/include
         third_party/ModelInterfaceRBDL/include
         third_party/OpenSoT/include
       LIBRARIES
@@ -77,15 +79,6 @@ if(${catkin_FOUND})
         cartesian_trajectory
         id_problem
         task_wrappers
-        rbdl
-        rbdl_urdfreader
-        OpenSoT
-        OpenSotBackEndQPOases
-        OpenSotBackEndeiQuadProg
-        XBotInterface
-        XBotCoreModel
-        ModelInterfaceRBDL
-        matlogger2
       CATKIN_DEPENDS
         wolf_msgs
         wolf_controller_utils
@@ -187,22 +180,42 @@ install(
 #  DESTINATION ${CMAKE_INSTALL_PREFIX}/include
 #)
 
-install(
-  TARGETS
-    rbdl
-    rbdl_urdfreader
-    quadruped_robot
-    cartesian_trajectory
-    id_problem
-    task_wrappers
-    OpenSoT
-    OpenSotBackEndQPOases
-    OpenSotBackEndeiQuadProg
-    XBotInterface
-    XBotCoreModel
-    ModelInterfaceRBDL
-    matlogger2
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-  LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-  RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+#install(
+#  TARGETS
+#    rbdl
+#    rbdl_urdfreader
+#    quadruped_robot
+#    cartesian_trajectory
+#    id_problem
+#    task_wrappers
+#    OpenSoT
+#    OpenSotBackEndQPOases
+#    OpenSotBackEndeiQuadProg
+#    XBotInterface
+#    XBotCoreModel
+#    ModelInterfaceRBDL
+#    matlogger2
+#  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+#  LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+#  RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+#)
+
+
+
+install(TARGETS
+        rbdl
+        rbdl_urdfreader
+        quadruped_robot
+        cartesian_trajectory
+        id_problem
+        task_wrappers
+        OpenSoT
+        OpenSotBackEndQPOases
+        OpenSotBackEndeiQuadProg
+        XBotInterface
+        XBotCoreModel
+        ModelInterfaceRBDL
+        matlogger2
+        DESTINATION lib/${PROJECT_NAME}
+        LIBRARY DESTINATION lib
 )
