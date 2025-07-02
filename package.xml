@@ -20,6 +20,7 @@
   <depend>wolf_msgs</depend>
   <depend>wolf_controller_utils</depend>
   <depend>interactive_markers</depend>
+  <depend>kdl_parser</depend>
 
   <export>
     <build_type condition="$ROS_VERSION == 2">ament_cmake</build_type>
