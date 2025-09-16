@@ -79,6 +79,14 @@ if(${catkin_FOUND})
         cartesian_trajectory
         id_problem
         task_wrappers
+        rbdl
+        rbdl_urdfreader
+        OpenSoT
+        OpenSotBackEndQPOases
+        OpenSotBackEndeiQuadProg
+        XBotInterface
+        XBotCoreModel
+        ModelInterfaceRBDL
       CATKIN_DEPENDS
         wolf_msgs
         wolf_controller_utils
