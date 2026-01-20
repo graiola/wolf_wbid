@@ -81,7 +81,9 @@ public:
   using ModelInterface::getPose;
   using ModelInterface::getCOM;
   using ModelInterface::getCOMVelocity;
+  using ModelInterface::getCOMJacobian;
   using ModelInterface::getJacobian;
+  using ModelInterface::getCentroidalMomentumMatrix;
 
   const std::map<std::string, Eigen::Vector3d>& getFeetPositionInWorld() const;
   const std::map<std::string, Eigen::Vector3d>& getFeetPositionInBase() const;

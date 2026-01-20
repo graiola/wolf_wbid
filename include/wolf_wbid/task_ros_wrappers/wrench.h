@@ -1,62 +1,64 @@
 /**
 WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
-
-WoLF is licensed under a license Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
-
-You should have received a copy of the license along with this
-work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
-**/
+*/
 
 #ifndef TASK_ROS_WRAPPERS_WRENCH_H
 #define TASK_ROS_WRAPPERS_WRENCH_H
 
-// WoLF msgs
+// ROS msgs
 #include <wolf_msgs/WrenchTask.h>
 #include <wolf_msgs/Wrench.h>
 
 // WoLF
 #include <wolf_wbid/task_ros_wrappers/handler.h>
+#include <wolf_wbid/task_interface.h>
 
-// WoLF utils
-#include <wolf_controller_utils/converters.h>
+// New OpenSoT-free task
+#include <wolf_wbid/wbid/tasks/wrench_task.h>
+#include <wolf_wbid/wbid/id_variables.h>
+
+// ROS RT buffer
+#include <realtime_tools/realtime_buffer.h>
+
+// Eigen
+#include <Eigen/Dense>
+#include <memory>
+#include <string>
 
 namespace wolf_wbid {
 
-// Wrench
+/**
+ * ROS wrapper for OpenSoT-free POINT_CONTACT wrench task
+ * Minimizes || f_contact - f_ref || with diagonal scalar weight.
+ */
 class WrenchImpl : public Wrench, public TaskRosHandler<wolf_msgs::WrenchTask>
 {
-
 public:
-
-  typedef std::shared_ptr<WrenchImpl> Ptr;
+  using Ptr = std::shared_ptr<WrenchImpl>;
 
   WrenchImpl(const std::string& robot_name,
              const std::string& task_id,
-             const std::string& distal_link,
-             const std::string& base_link,
-             OpenSoT::AffineHelper& wrench,
+             const std::string& contact_name,
+             const IDVariables& vars,
              const double& period = 0.001);
 
-  virtual void registerReconfigurableVariables() override;
+  void registerReconfigurableVariables() override;
+  void loadParams() override;
+  void updateCost(const Eigen::VectorXd& x) override;
+  void publish() override;
+  bool reset() override;
 
-  virtual void loadParams() override;
-
-  virtual void updateCost(const Eigen::VectorXd& x) override;
-
-  virtual void publish() override;
-
-  virtual bool reset() override;
+  // called by IDProblem/update loop (like others)
+  void update(const Eigen::VectorXd& x);
 
 private:
-
-  virtual void _update(const Eigen::VectorXd& x) override;
-
   void referenceCallback(const wolf_msgs::Wrench::ConstPtr& msg);
 
-  realtime_tools::RealtimeBuffer<Eigen::Vector6d> buffer_reference_;
+  const IDVariables& vars_;
 
+  realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_force_;
 };
 
-} // namespace
+} // namespace wolf_wbid
 
 #endif // TASK_ROS_WRAPPERS_WRENCH_H

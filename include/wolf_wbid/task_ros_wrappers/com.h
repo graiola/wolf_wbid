@@ -1,63 +1,39 @@
-/**
-WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
+#pragma once
 
-WoLF is licensed under a license Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
+#include <wolf_wbid/task_interface.h>
+#include <wolf_wbid/task_ros_wrappers/handler.h>
 
-You should have received a copy of the license along with this
-work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
-**/
-
-#ifndef TASK_ROS_WRAPPERS_COM_H
-#define TASK_ROS_WRAPPERS_COM_H
-
-
-// WoLF msgs
 #include <wolf_msgs/ComTask.h>
 #include <wolf_msgs/Com.h>
 
-// WoLF
-#include <wolf_wbid/task_ros_wrappers/handler.h>
-
-// WoLF utils
-#include <wolf_controller_utils/converters.h>
+#include <realtime_tools/realtime_buffer.h>
 
 namespace wolf_wbid {
 
-// Com
 class ComImpl : public Com, public TaskRosHandler<wolf_msgs::ComTask>
 {
-
 public:
-
-  typedef std::shared_ptr<ComImpl> Ptr;
+  using Ptr = std::shared_ptr<ComImpl>;
 
   ComImpl(const std::string& robot_name,
-          const XBot::ModelInterface& robot,
-          const OpenSoT::AffineHelper& qddot,
+          const std::string& task_id,
+          QuadrupedRobot& robot,
+          const IDVariables& vars,
           const double& period = 0.001);
 
-  virtual void registerReconfigurableVariables() override;
-
-  virtual void loadParams() override;
-
-  virtual void updateCost(const Eigen::VectorXd& x) override;
-
-  virtual void publish() override;
-
-  virtual bool reset() override;
+  void registerReconfigurableVariables() override;
+  void loadParams() override;
+  void updateCost(const Eigen::VectorXd& x) override;
+  void publish() override;
+  bool reset() override;
 
 private:
 
-  virtual void _update(const Eigen::VectorXd& x) override;
-
+  void _update(const Eigen::VectorXd& x) override;  
   void referenceCallback(const wolf_msgs::Com::ConstPtr& msg);
 
   realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_pos_;
   realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_vel_;
-
 };
 
-} // namespace
-
-#endif // TASK_ROS_WRAPPERS_COM_H
-
+} // namespace wolf_wbid

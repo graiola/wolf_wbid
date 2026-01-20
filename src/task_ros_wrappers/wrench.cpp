@@ -1,140 +1,156 @@
 /**
  * @file wrench.cpp
  * @author Gennaro Raiola
- * @date 25 April, 2023
- * @brief This file contains the wrench task wrapper for ROS
+ * @brief ROS wrapper for OpenSoT-free POINT_CONTACT wrench task
  */
 
-// WoLF
 #include <wolf_wbid/task_ros_wrappers/wrench.h>
 
-using namespace wolf_wbid;
+// STD
+#include <stdexcept>
+
+namespace wolf_wbid {
 
 WrenchImpl::WrenchImpl(const std::string& robot_name,
                        const std::string& task_id,
-                       const std::string& distal_link,
-                       const std::string& base_link,
-                       OpenSoT::AffineHelper& wrench,
+                       const std::string& contact_name,
+                       const IDVariables& vars,
                        const double& period)
-  :Wrench(robot_name,task_id,distal_link,base_link,wrench,period)
-  ,TaskRosHandler<wolf_msgs::WrenchTask>(task_id,robot_name,period)
+  : Wrench(robot_name, task_id, contact_name, period)
+  , TaskRosHandler<wolf_msgs::WrenchTask>(task_id, robot_name, period)
+  , vars_(vars)
 {
-  tmp_vectorXd_.resize(6); // Wrench
-  tmp_vectorXd_.setZero();
+  Eigen::Vector3d z = Eigen::Vector3d::Zero();
+  buffer_reference_force_.initRT(z);
 
-  // Initialize buffers
-  buffer_reference_.initRT(tmp_vectorXd_);
-
-  // Create the reference subscriber
-  reference_sub_ = nh_.subscribe("reference/"+_task_id, 1000, &WrenchImpl::referenceCallback, this);
+  // reference subscriber
+  reference_sub_ = nh_.subscribe("reference/" + task_id, 1000,
+                                 &WrenchImpl::referenceCallback, this);
 }
 
 void WrenchImpl::registerReconfigurableVariables()
 {
-  double lambda1 = getLambda();
-  double weight  = getWeight()(0,0);
-  ddr_server_->registerVariable<double>("set_lambda_1",    lambda1,     boost::bind(&TaskWrapperInterface::setLambda1,this,_1)    ,"set lambda 1"   ,0.0,1000.0);
-  ddr_server_->registerVariable<double>("set_weight_diag", weight,      boost::bind(&TaskWrapperInterface::setWeightDiag,this,_1) ,"set weight diag",0.0,1000.0);
+  // Only weight for this task (no lambda in OpenSoT-free wrench task)
+  double w = this->weight();
+
+  ddr_server_->registerVariable<double>(
+        "set_weight_diag", w,
+        boost::bind(&TaskWrapperInterface::setWeightDiag, this, _1),
+        "set weight diag (scalar)", 0.0, 10000.0);
+
   ddr_server_->publishServicesTopics();
 }
 
 void WrenchImpl::loadParams()
 {
+  double weight;
 
-  double lambda1, weight;
-  if (!nh_.getParam("gains/"+_task_id+"/lambda1" , lambda1))
-  {
-    ROS_DEBUG("No lambda1 gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
-    lambda1 = getLambda();
-  }
-  if (!nh_.getParam("gains/"+_task_id+"/weight" , weight))
-  {
-    ROS_DEBUG("No weight gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
-    weight = getWeight()(0,0);
-  }
-  // Check if the values are positive
-  if(lambda1 < 0 || weight < 0)
-    throw std::runtime_error("Lambda and weight must be positive!");
+  // IMPORTANT: avoid ambiguity by explicitly using TaskWrapperInterface::task_name_
+  const std::string& tn = TaskWrapperInterface::task_name_;
 
-  buffer_lambda1_ = lambda1;
+  if(!nh_.getParam("gains/" + tn + "/weight", weight))
+    weight = this->weight();
+
+  if(weight < 0.0)
+    throw std::runtime_error("WrenchImpl::loadParams(): weight must be positive!");
+
   buffer_weight_diag_ = weight;
 
-  setLambda(lambda1);
-  setWeight(weight);
+  // apply
+  this->setWeight(weight);
+}
+
+void WrenchImpl::update(const Eigen::VectorXd& /*x*/)
+{
+  // dynamic reconfigure -> task params
+  if(OPTIONS.set_ext_weight)
+  {
+    this->setWeight(buffer_weight_diag_.load());
+  }
+
+  // external reference (topic)
+  if(OPTIONS.set_ext_reference)
+  {
+    this->setReference(*buffer_reference_force_.readFromRT());
+  }
+
+  // NOTE: No math here: the QP term is built later by calling WrenchTask::compute(vars, term)
 }
 
 void WrenchImpl::updateCost(const Eigen::VectorXd& x)
 {
-  cost_ = computeCost(x);
+  // cost = 0.5 * w * ||f - fref||^2
+  if(vars_.contactDim() != 3)
+    throw std::runtime_error("WrenchImpl::updateCost(): only POINT_CONTACT supported");
+
+  const int off = vars_.contactOffset(this->contactName());
+  if(off < 0 || off + 3 > x.size())
+    throw std::runtime_error("WrenchImpl::updateCost(): contact block out of range");
+
+  const Eigen::Vector3d f_act = x.segment<3>(off);
+  const Eigen::Vector3d f_ref = this->reference();
+  const Eigen::Vector3d e = f_act - f_ref;
+
+  cost_ = 0.5 * this->weight() * e.squaredNorm();
 }
 
 void WrenchImpl::publish()
 {
+  if(!rt_pub_) return;
+
   if(rt_pub_->trylock())
   {
-    rt_pub_->msg_.header.frame_id = getBaseLink();
+    rt_pub_->msg_.header.frame_id = WORLD_FRAME_NAME; // or keep as task base if you want
     rt_pub_->msg_.header.stamp = ros::Time::now();
 
-    // FIXME
-    // ACTUAL VALUES
-    //getActualPose(tmp_vector3d_);
-    //// Pose - Translation
-    //wolf_controller_utils::vector3dToVector3(tmp_vector3d_,rt_pub_->msg_.position_actual);
-    //// Velocity reference
-    //tmp_vector3d_ = getCachedVelocityReference();
-    //wolf_controller_utils::vector3dToVector3(tmp_vector3d_,rt_pub_->msg_.velocity_reference);
+    // actual from last solution is not stored in task: compute from last x_ if you have it,
+    // here we publish what we can: reference + cost. If you want actual, pass x_ into publish().
+    // For now publish reference as the desired wrench (force only), actual zeros.
+    const Eigen::Vector3d f_ref = this->reference();
 
-    // REFERENCE VALUES
-    //getReference(tmp_vectorXd_);
-    //// Pose - Translation
-    //wolf_controller_utils::vector3dToVector3(tmp_vector3d_,rt_pub_->msg_.position_reference);
+    // reference
+    rt_pub_->msg_.wrench_reference.force.x  = f_ref.x();
+    rt_pub_->msg_.wrench_reference.force.y  = f_ref.y();
+    rt_pub_->msg_.wrench_reference.force.z  = f_ref.z();
+    rt_pub_->msg_.wrench_reference.torque.x = 0.0;
+    rt_pub_->msg_.wrench_reference.torque.y = 0.0;
+    rt_pub_->msg_.wrench_reference.torque.z = 0.0;
 
-    // COST
+    // actual (not available here without x) => set to 0
+    rt_pub_->msg_.wrench_actual.force.x  = 0.0;
+    rt_pub_->msg_.wrench_actual.force.y  = 0.0;
+    rt_pub_->msg_.wrench_actual.force.z  = 0.0;
+    rt_pub_->msg_.wrench_actual.torque.x = 0.0;
+    rt_pub_->msg_.wrench_actual.torque.y = 0.0;
+    rt_pub_->msg_.wrench_actual.torque.z = 0.0;
+
     rt_pub_->msg_.cost = cost_;
 
     rt_pub_->unlockAndPublish();
   }
 }
 
-void WrenchImpl::_update(const Eigen::VectorXd& x)
-{
-  if(OPTIONS.set_ext_lambda)
-    setLambda(buffer_lambda1_);
-  if(OPTIONS.set_ext_weight)
-    setWeight(buffer_weight_diag_);
-  if(OPTIONS.set_ext_reference)
-  {
-    // Set external reference
-    setReference(*buffer_reference_.readFromRT());
-  }
-  OpenSoT::tasks::force::Wrench::_update(x);
-}
-
 bool WrenchImpl::reset()
 {
-  //bool res = OpenSoT::tasks::force::Wrench::reset(); // Task's reset (FIXME it is not implemented in OpenSoT)
-  bool res = true;
-  getReference(tmp_vectorXd_);
-  buffer_reference_.initRT(tmp_vectorXd_);
-  //getActualPose(tmp_vector3d_);
-  //tmp_affine3d_ = Eigen::Affine3d::Identity();
-  //tmp_affine3d_.translation() = tmp_vector3d_;
-  //trj_->reset(tmp_affine3d_);
-  return res;
+  // reset reference to zero (task-level)
+  this->WrenchTask::reset();
+
+  // sync RT buffer
+  Eigen::Vector3d z = Eigen::Vector3d::Zero();
+  buffer_reference_force_.initRT(z);
+
+  return true;
 }
 
 void WrenchImpl::referenceCallback(const wolf_msgs::Wrench::ConstPtr& msg)
 {
-  double period = period_;
+  Eigen::Vector3d f;
+  f.x() = msg->wrench.force.x;
+  f.y() = msg->wrench.force.y;
+  f.z() = msg->wrench.force.z;
 
-  if(last_time_ != 0.0)
-    period = msg->header.stamp.toSec() - last_time_;
-
-  Eigen::Vector6d reference = Eigen::Vector6d::Zero();
-  reference(0) = msg->wrench.force.x;
-  reference(1) = msg->wrench.force.y;
-  reference(2) = msg->wrench.force.z;
-  buffer_reference_.writeFromNonRT(reference);
-
+  buffer_reference_force_.writeFromNonRT(f);
   last_time_ = msg->header.stamp.toSec();
 }
+
+} // namespace wolf_wbid

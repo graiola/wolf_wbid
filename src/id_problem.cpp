@@ -1,13 +1,9 @@
-/**
- * @file id_problem.cpp
- * @author Gennaro Raiola, Enrico Mingo Hoffman, Michele Focchi
- * @date 12 June, 2019
- * @brief This file contains the implementation of the Inverse Dynamic problem
- */
-
 #include <wolf_wbid/id_problem.h>
-#include <OpenSoT/utils/Affine.h>
 
+#include <stdexcept>
+#include <limits>
+
+// wrappers ROS
 #ifdef ROS
   #include <wolf_wbid/task_ros_wrappers/cartesian.h>
   #include <wolf_wbid/task_ros_wrappers/com.h>
@@ -22,678 +18,544 @@
   #include <wolf_wbid/task_ros2_wrappers/wrench.h>
 #endif
 
-using namespace OpenSoT;
-
 namespace wolf_wbid {
 
+static inline double kBig() { return 1.0e20; }
 
-IDProblem::IDProblem(QuadrupedRobot::Ptr model):
-  model_(model),
-  control_mode_(WPG),
-  initialized_(false),
-  activate_com_z_(true),
-  activate_angular_momentum_(true),
-  activate_postural_(false),
-  activate_joint_position_limits_(false),
-  change_control_mode_(false),
-  regularization_value_(1e-3),
-  min_forces_weight_(0.0),
-  min_qddot_weight_(0.0)
+IDProblem::IDProblem(QuadrupedRobot::Ptr model)
+: model_(std::move(model))
 {
-  foot_names_          = model_->getFootNames();
-  ee_names_            = model_->getEndEffectorNames();
-  contact_names_       = model_->getContactNames();
+  if(!model_) throw std::runtime_error("IDProblem: null model");
+
+  foot_names_    = model_->getFootNames();
+  ee_names_      = model_->getEndEffectorNames();
+  contact_names_ = model_->getContactNames();
+
+  z_force_lower_lim_ = 0.1 * GRAVITY * (model_->getMass() / N_LEGS);
+
+  wrench_upper_lims_ << 2000, 2000, 2000, 0, 0, 0;
+  wrench_lower_lims_ << x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_, 0, 0, 0;
+
+  for(const auto& c : foot_names_) contact_enabled_[c] = true;
 }
 
-IDProblem::~IDProblem()
-{
-}
+IDProblem::~IDProblem() = default;
 
 void IDProblem::init(const std::string& robot_name, const double& dt)
 {
+  if(initialized_) return;
 
-  if(initialized_)
-    return;
+  // variables: qddot + point-contact forces
+  vars_ = std::make_unique<IDVariables>(model_->getJointNum(),
+                                       foot_names_,
+                                       IDVariables::ContactModel::POINT_CONTACT);
 
-  //
-  //  This utility internally creates the right variables which later we will use to
-  //  create all the tasks and constraints
-  //
-  OpenSoT::utils::InverseDynamics::CONTACT_MODEL id_contact_type = OpenSoT::utils::InverseDynamics::CONTACT_MODEL::POINT_CONTACT;
-  id_ = std::make_shared<OpenSoT::utils::InverseDynamics>(foot_names_, *model_, id_contact_type);
+  // --- tasks
+  for(const auto& fn : foot_names_)
+  {
+    feet_[fn] = std::make_shared<CartesianImpl>(robot_name, fn, *model_, fn,
+                                                WORLD_FRAME_NAME, dt);
+    feet_[fn]->setLambda(0., 0.);
+    feet_[fn]->setWeightIsDiagonalFlag(true);
+    feet_[fn]->loadParams();
+    feet_[fn]->registerReconfigurableVariables();
+  }
 
-  //
-  // Here we create all the tasks
-  //   --------------------------
-  for(unsigned int i=0; i<foot_names_.size(); i++)
+  for(const auto& ee : ee_names_)
   {
-    feet_[foot_names_[i]] = std::make_shared<CartesianImpl>(robot_name,foot_names_[i], *model_, foot_names_[i],
-                                                            WORLD_FRAME_NAME, id_->getJointsAccelerationAffine(),dt);
-    feet_[foot_names_[i]]->setLambda(0.,0.);
-    feet_[foot_names_[i]]->setWeightIsDiagonalFlag(true);
-    feet_[foot_names_[i]]->setGainType(OpenSoT::tasks::acceleration::GainType::Force);
-    feet_[foot_names_[i]]->OPTIONS.set_ext_lambda = false;
-    feet_[foot_names_[i]]->loadParams();
-    feet_[foot_names_[i]]->registerReconfigurableVariables();
+    arms_[ee] = std::make_shared<CartesianImpl>(robot_name, ee, *model_, ee,
+                                                model_->getBaseLinkName(), dt);
+    arms_[ee]->setLambda(1., 1.);
+    arms_[ee]->setWeightIsDiagonalFlag(true);
+    arms_[ee]->OPTIONS.set_ext_reference = true;
+    arms_[ee]->loadParams();
+    arms_[ee]->registerReconfigurableVariables();
   }
-  //   --------------------------
-  for(unsigned int i=0; i<ee_names_.size(); i++)
+
+  for(const auto& fn : foot_names_)
   {
-    arms_[ee_names_[i]] = std::make_shared<CartesianImpl>(robot_name,ee_names_[i], *model_, ee_names_[i],
-                                                          model_->getBaseLinkName(), id_->getJointsAccelerationAffine(),dt);
-    arms_[ee_names_[i]]->setLambda(1.,1.);
-    arms_[ee_names_[i]]->setWeightIsDiagonalFlag(true);
-    arms_[ee_names_[i]]->setGainType(OpenSoT::tasks::acceleration::GainType::Acceleration);
-    arms_[ee_names_[i]]->OPTIONS.set_ext_reference = true;
-    arms_[ee_names_[i]]->loadParams();
-    arms_[ee_names_[i]]->registerReconfigurableVariables();
+    sarawrenches_[fn] = std::make_shared<WrenchImpl>(robot_name,
+                                             fn + "_wrench",
+                                             fn,
+                                             *vars_,
+                                             dt);
+    wrenches_[fn]->setLambda(1.);
+    wrenches_[fn]->setWeightIsDiagonalFlag(true);
+    wrenches_[fn]->OPTIONS.set_ext_lambda = true;
+    wrenches_[fn]->loadParams();
+    wrenches_[fn]->registerReconfigurableVariables();
   }
-  auto wrench = id_->getContactsWrenchAffine();
-  for(unsigned int i=0; i<foot_names_.size(); i++)
-  {
-    wrenches_[foot_names_[i]] = std::make_shared<WrenchImpl>(robot_name,foot_names_[i]+"_wrench", foot_names_[i],
-                                                             WORLD_FRAME_NAME, wrench[i], dt);
-    wrenches_[foot_names_[i]]->setLambda(1.);
-    wrenches_[foot_names_[i]]->setWeightIsDiagonalFlag(true);
-    wrenches_[foot_names_[i]]->OPTIONS.set_ext_lambda = true;
-    wrenches_[foot_names_[i]]->loadParams();
-    wrenches_[foot_names_[i]]->registerReconfigurableVariables();
-  }
-  //   --------------------------
-  angular_momentum_ = std::make_shared<AngularMomentumImpl>(robot_name,*model_,id_->getJointsAccelerationAffine(), dt);
+
+  angular_momentum_ = std::make_shared<AngularMomentumImpl>(robot_name, *model_, dt);
   angular_momentum_->setLambda(0.);
   angular_momentum_->setWeightIsDiagonalFlag(true);
-  angular_momentum_->setReference(Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero());
+  angular_momentum_->setReference(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
   angular_momentum_->setMomentumGain(Eigen::Matrix3d::Identity());
   angular_momentum_->loadParams();
   angular_momentum_->registerReconfigurableVariables();
-  //   --------------------------
-  waist_ = std::make_shared<CartesianImpl>(robot_name,"waist", *model_, model_->getBaseLinkName(),
-                                           WORLD_FRAME_NAME, id_->getJointsAccelerationAffine(), dt);
-  waist_->setLambda(1.,1.);
+
+  waist_ = std::make_shared<CartesianImpl>(robot_name, "waist", *model_, model_->getBaseLinkName(),
+                                           WORLD_FRAME_NAME, dt);
+  waist_->setLambda(1., 1.);
   waist_->setWeightIsDiagonalFlag(true);
-  waist_->setGainType(OpenSoT::tasks::acceleration::GainType::Force);
   waist_->loadParams();
   waist_->registerReconfigurableVariables();
-  //   --------------------------
-  postural_ = std::make_shared<PosturalImpl>(robot_name,*model_, id_->getJointsAccelerationAffine(), "postural", dt);
-  postural_->setLambda(1.,1.);
+
+  postural_ = std::make_shared<PosturalImpl>(robot_name, *model_, "postural", dt);
+  postural_->setLambda(1., 1.);
   postural_->setWeightIsDiagonalFlag(true);
-  postural_->setGainType(OpenSoT::tasks::acceleration::GainType::Force);
   postural_->loadParams();
   postural_->registerReconfigurableVariables();
   postural_->setReference(model_->getStandUpJointPostion());
-  //   --------------------------
-  com_ = std::make_shared<ComImpl>(robot_name,*model_, id_->getJointsAccelerationAffine(), dt);
-  com_->setLambda(1.,1.);
+
+  // NOTE: ComImpl signature must be (robot_name, robot, vars, task_id, period)
+  com_ = std::make_shared<ComImpl>(robot_name, *model_, *vars_, "com", dt);
+  com_->setLambda(1., 1.);
   com_->setWeightIsDiagonalFlag(true);
   com_->loadParams();
   com_->registerReconfigurableVariables();
-  //   --------------------------
-  for(unsigned int i = 0; i < id_->getContactsWrenchAffine().size(); i++)
-    min_forces_.push_back(OpenSoT::tasks::MinimizeVariable::Ptr(std::make_shared<OpenSoT::tasks::MinimizeVariable>("min_force_"+std::to_string(i), id_->getContactsWrenchAffine()[i])));
-  min_qddot_ = std::make_shared<OpenSoT::tasks::MinimizeVariable>("min_qddot", id_->getJointsAccelerationAffine());
-  //
-  // Here we create the constraints & bounds
-  //
-  //   --------------------------
-  OpenSoT::constraints::force::FrictionCones::friction_cones fcs;
-  fc_.second = 1.0; // mu
-  fc_.first.setIdentity();
-  for(unsigned int i = 0; i < foot_names_.size(); i++)
-    fcs.push_back(fc_);
-  friction_cones_ = std::make_shared<OpenSoT::constraints::force::FrictionCones>(foot_names_,id_->getContactsWrenchAffine(),*model_,fcs);
-  //   --------------------------
-  x_force_lower_lim_ = -2000;
-  y_force_lower_lim_ = -2000;
-  z_force_lower_lim_ = 0.1*GRAVITY*(model_->getMass()/N_LEGS);
-  wrench_upper_lims_<<2000,2000,2000,Eigen::Vector3d::Zero();
-  wrench_lower_lims_<<x_force_lower_lim_,y_force_lower_lim_,z_force_lower_lim_,Eigen::Vector3d::Zero();
-  wrenches_lims_ = std::make_shared<OpenSoT::constraints::force::WrenchesLimits>(
-        foot_names_, wrench_lower_lims_, wrench_upper_lims_,id_->getContactsWrenchAffine());
-  //   --------------------------
-  Eigen::VectorXd tau_max;
-  model_->getEffortLimits(tau_max);
-  tau_max.head(FLOATING_BASE_DOFS).setZero();
-  tau_max = 0.9 * tau_max; // Il trucco
-  torque_lims_ = std::make_shared<OpenSoT::constraints::acceleration::TorqueLimits>(*model_,id_->getJointsAccelerationAffine(),id_->getContactsWrenchAffine(),foot_names_,tau_max);
-  //   --------------------------
-  Eigen::VectorXd q_max, q_min, q_home, qddot_max;
-  Eigen::MatrixXd M;
-  model_->getJointLimits(q_min,q_max);
-//  q_min.head(FLOATING_BASE_DOFS) = Eigen::Vector6d::Ones() * -10000.0;
-//  q_max.head(FLOATING_BASE_DOFS) = Eigen::Vector6d::Ones() *  10000.0;
-  model_->getRobotState("standup",q_home);
-  model_->setJointPosition(q_home);
-  model_->update();
-  model_->getInertiaMatrix(M);
-  M.topRows(FLOATING_BASE_DOFS).setZero(); M.leftCols(FLOATING_BASE_DOFS).setZero(); M.block(0,0,FLOATING_BASE_DOFS,FLOATING_BASE_DOFS) = Eigen::MatrixXd(FLOATING_BASE_DOFS,FLOATING_BASE_DOFS).setIdentity();
-  qddot_max = M.inverse() * tau_max;
-  q_lims_ = std::make_shared<OpenSoT::constraints::acceleration::JointLimits>(*model_,id_->getJointsAccelerationAffine(),
-                                                                              q_max,q_min,
-                                                                              qddot_max.cwiseAbs(),dt);
-  std::list<unsigned int> id_q_lims;
-  for(unsigned int i = 0; i < model_->getJointNames().size(); ++i)
+
+  // --- constraints
+  constraints_.clear();
+
+  // friction cones per foot
+  friction_cones_.clear();
+  for(const auto& fn : foot_names_)
   {
-      std::string joint_name = model_->getJointNames()[i];
-      if(!(model_->getUrdf().getJoint(joint_name)->type == urdf::Joint::CONTINUOUS))
-          id_q_lims.push_back(i+FLOATING_BASE_DOFS);
+    auto fc = std::make_shared<FrictionConeConstraint>(fn, *vars_, fc_R_, mu_);
+    friction_cones_[fn] = fc;
+    constraints_.push_back(fc);
   }
 
-
-  //
-  // Here we create some indices for the subtask definitions
-  //
-  std::list<unsigned int> id_XYZ   = {0,1,2}; //xyz
-  std::list<unsigned int> id_XY    = {0,1};   //xy
-  std::list<unsigned int> id_Z     = {2};     //z
-  std::list<unsigned int> id_RPY   = {3,4,5}; //r,p,y
-  std::list<unsigned int> id_limbs;
-  id_limbs.resize(postural_->getTaskSize()-FLOATING_BASE_DOFS);
-  std::list<unsigned int>::iterator it;
-  unsigned int idx = FLOATING_BASE_DOFS;
-  for (it = id_limbs.begin(); it != id_limbs.end(); ++it)
+  // force bounds per foot (bounds-only constraint => uses l/u inside ConstraintBase)
+  force_bounds_.clear();
+  for(const auto& fn : foot_names_)
   {
-      *it = idx;
-      idx++;
+    Eigen::Vector3d fmin(x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_);
+    Eigen::Vector3d fmax(wrench_upper_lims_.head<3>());
+
+    auto cb = std::make_shared<ContactForceBoundsConstraint>(fn, *vars_, fmin, fmax);
+    force_bounds_[fn] = cb;
+    constraints_.push_back(cb);
   }
 
-  //
-  // Here we create the stack
-  //
-  OpenSoT::tasks::Aggregated::Ptr feet_aggregated, arm_aggregated, wrenches_aggregated;//, arm_aggregated_weighted;
-
-  feet_aggregated = std::make_shared<OpenSoT::tasks::Aggregated>(feet_[foot_names_[0]]%id_XYZ,feet_[foot_names_[0]]->getXSize());
-  for(unsigned int i=1;i<foot_names_.size();i++)
-    feet_aggregated = feet_aggregated + feet_[foot_names_[i]]%id_XYZ;
-
-  wrenches_aggregated = std::make_shared<OpenSoT::tasks::Aggregated>(wrenches_[foot_names_[0]]%id_XYZ,wrenches_[foot_names_[0]]->getXSize());
-  for(unsigned int i=1;i<foot_names_.size();i++)
-    wrenches_aggregated = wrenches_aggregated + wrenches_[foot_names_[i]]%id_XYZ;
-
-  std::list<unsigned int> id_waist = id_RPY;
-  std::list<unsigned int> id_com = id_XY;
-  if(activate_com_z_)
+  // torque limits (linear constraints)
   {
-      id_com.merge(id_Z);
-      PRINT_INFO_NAMED(CLASS_NAME,"CoM z is active");
-  }
-  else
-  {
-      id_waist.merge(id_Z);
-      PRINT_INFO_NAMED(CLASS_NAME,"CoM z is NOT active");
+    Eigen::VectorXd tau_max;
+    model_->getEffortLimits(tau_max);
+    tau_max.head(FLOATING_BASE_DOFS).setZero();
+    tau_max = 0.9 * tau_max;
+
+    torque_limits_ = std::make_shared<TorqueLimitsConstraint>(*model_, *vars_, foot_names_, tau_max);
+    constraints_.push_back(torque_limits_);
   }
 
-  wpg_stack_ /= (feet_aggregated + waist_%id_waist + com_%id_com);
+  // solver
+  solver_ = CreateDefaultSolver(); // your factory
+  if(!solver_) throw std::runtime_error("IDProblem::init(): solver factory returned null");
 
-  mpc_stack_ /= (feet_aggregated + waist_ + wrenches_aggregated);
-
-  if(activate_angular_momentum_)
-  {
-      wpg_stack_->getStack()[0] = angular_momentum_ + wpg_stack_->getStack()[0];
-      mpc_stack_->getStack()[0] = angular_momentum_ + mpc_stack_->getStack()[0];
-      PRINT_INFO_NAMED(CLASS_NAME,"angular momentum task is active");
-  }
-  else
-      PRINT_INFO_NAMED(CLASS_NAME,"angular momentum task is NOT active");
-
-  if(activate_postural_)
-  {
-      wpg_stack_->getStack()[0] = postural_%id_limbs + wpg_stack_->getStack()[0];
-      mpc_stack_->getStack()[0] = postural_%id_limbs + mpc_stack_->getStack()[0];
-      PRINT_INFO_NAMED(CLASS_NAME,"postural task is active");
-  }
-  else
-      PRINT_INFO_NAMED(CLASS_NAME,"postural task is NOT active");
-
-
-  if(ee_names_.size() > 0)
-  {
-    arm_aggregated = std::make_shared<OpenSoT::tasks::Aggregated>(arms_[ee_names_[0]],arms_[ee_names_[0]]->getXSize());
-    //arm_aggregated_weighted = std::make_shared<OpenSoT::tasks::Aggregated>(arms_[ee_names_[0]],arms_[ee_names_[0]]->getXSize());
-    if(ee_names_.size() > 1)
-    {
-      for(unsigned int i=1;i<ee_names_.size();i++)
-        arm_aggregated = arm_aggregated + arms_[ee_names_[i]];
-       //arm_aggregated_weighted = 50.0 * arm_aggregated%id_XYZ + arm_aggregated%id_RPY;
-    }
-    wpg_stack_->getStack()[0] = arm_aggregated + wpg_stack_->getStack()[0];
-    mpc_stack_->getStack()[0] = arm_aggregated + mpc_stack_->getStack()[0];
-  }
-
-  // Add the minimization tasks if their weight is greated than zero (if not changed externally, by default it is 0.0)
-  if(min_forces_weight_>0.0)
-  {
-    for(unsigned int i=0;i<min_forces_.size();i++)
-    {
-      wpg_stack_->getStack()[0] = min_forces_weight_ * min_forces_[i] + wpg_stack_->getStack()[0];
-      mpc_stack_->getStack()[0] = min_forces_weight_ * min_forces_[i] + mpc_stack_->getStack()[0];
-    }
-    PRINT_INFO_NAMED(CLASS_NAME,"force minimization tasks are active");
-  }
-  else
-    PRINT_INFO_NAMED(CLASS_NAME,"force minimization tasks are NOT active");
-
-  if(min_qddot_weight_>0.0)
-  {
-    wpg_stack_->getStack()[0] = min_qddot_weight_ * min_qddot_ + wpg_stack_->getStack()[0];
-    mpc_stack_->getStack()[0] = min_qddot_weight_ * min_qddot_ + mpc_stack_->getStack()[0];
-    PRINT_INFO_NAMED(CLASS_NAME,"joint accelerations minimization task is active");
-  }
-  else
-    PRINT_INFO_NAMED(CLASS_NAME,"joint accelerations minimization task is NOT active");
-
-  dynamics_task_ = std::make_shared<OpenSoT::tasks::acceleration::DynamicFeasibility>("dynamics", *model_,
-                                                                                      id_->getJointsAccelerationAffine(),
-                                                                                      id_->getContactsWrenchAffine(), foot_names_);
-
-  dynamics_con_ = std::make_shared<OpenSoT::constraints::TaskToConstraint>(dynamics_task_);
-
-  wpg_stack_ << wrenches_lims_ << torque_lims_ << friction_cones_;
-  mpc_stack_ << dynamics_con_ << friction_cones_;
-
-  if(activate_joint_position_limits_)
-  {
-    wpg_stack_ << q_lims_%id_q_lims;
-    mpc_stack_ << q_lims_%id_q_lims;
-    PRINT_INFO_NAMED(CLASS_NAME,"joint position limits constraint is active");
-  }
-  else
-    PRINT_INFO_NAMED(CLASS_NAME,"joint position limits constraint is NOT active");
-
-  // Regularization and first update
-  Eigen::Index n = id_->getSerializer()->getSize();
-  Eigen::VectorXd b_reg;
-  Eigen::MatrixXd A_reg;
-  Eigen::MatrixXd W_reg;
-  A_reg = Eigen::MatrixXd::Identity(n,n);
-  b_reg = Eigen::VectorXd::Zero(n);
-  W_reg = Eigen::MatrixXd::Identity(n,n) * regularization_value_;
-  unsigned int n_limbs = model_->getNumberArms() + model_->getNumberLegs();
-  unsigned int force_size = 6;
-  if(id_contact_type == OpenSoT::utils::InverseDynamics::CONTACT_MODEL::POINT_CONTACT)
-    force_size = 3;
-  unsigned int n_forces = force_size * n_limbs;
-  regularization_ = std::make_shared<OpenSoT::tasks::GenericTask>("regularization",A_reg,b_reg);
-  W_reg.bottomRightCorner(n_forces,n_forces) = W_reg.bottomRightCorner(n_forces,n_forces) * regularization_value_;
-  regularization_->setWeight(W_reg);
-
-  wpg_stack_->setRegularisationTask(regularization_);
-  wpg_stack_->update(Eigen::VectorXd(1));
-
-  mpc_stack_->setRegularisationTask(regularization_);
-  mpc_stack_->update(Eigen::VectorXd(1));
-
-  x_.setZero(id_->getSerializer()->getSize());
-
+  // buffers
+  x_.setZero(vars_->size());
   qddot_.setZero(model_->getJointNum());
-  contact_wrenches_.reserve(contact_names_.size());
-
-  wpg_solver_ = std::make_unique<OpenSoT::solvers::iHQP>(wpg_stack_->getStack(), wpg_stack_->getBounds(),1.0,OpenSoT::solvers::solver_back_ends::eiQuadProg);
-  mpc_solver_ = std::make_unique<OpenSoT::solvers::iHQP>(mpc_stack_->getStack(), mpc_stack_->getBounds(),1.0,OpenSoT::solvers::solver_back_ends::eiQuadProg);
-  // Possible solvers
-  //,OpenSoT::solvers::wpg_solver_back_ends::qpOASES   );
-  //,OpenSoT::solvers::wpg_solver_back_ends::OSQP      );
-  //,OpenSoT::solvers::wpg_solver_back_ends::GLPK      );
-  //,OpenSoT::solvers::wpg_solver_back_ends::eiQuadProg);
-  //,OpenSoT::solvers::wpg_solver_back_ends::ODYS      );
-  //,OpenSoT::solvers::wpg_solver_back_ends::qpSWIFT   );
-  //,OpenSoT::solvers::wpg_solver_back_ends::proxQP    );
-
-  PRINT_INFO_NAMED(CLASS_NAME,"Solver created");
-
+  contact_wrenches_.resize(foot_names_.size(), Eigen::Vector6d::Zero());
 
   initialized_ = true;
 }
 
+void IDProblem::setControlMode(mode_t mode)
+{
+  // currently ignored: single-stack WPG
+  if(control_mode_ != mode) {
+    control_mode_ = mode;
+    change_control_mode_ = true;
+  } else {
+    change_control_mode_ = false;
+  }
+}
+
 void IDProblem::setFrictionConesMu(const double& mu)
 {
-  assert(mu>=0.0 && mu<=1.0);
-  fc_.second = mu;
+  if(mu < 0.0 || mu > 1.0) throw std::runtime_error("mu out of [0,1]");
+  mu_ = mu;
 }
 
-double IDProblem::getFrictionConesMu() const
-{
-  return fc_.second;
-}
+double IDProblem::getFrictionConesMu() const { return mu_; }
+void IDProblem::setFrictionConesR(const Eigen::Matrix3d& R) { fc_R_ = R; }
 
-void IDProblem::reset()
-{
-  // Reset Tasks
-  for (auto& tmp_map : arms_)
-  {
-    tmp_map.second->update(Eigen::VectorXd(1));
-    tmp_map.second->reset();
-  }
-  for (auto& tmp_map : feet_)
-  {
-    tmp_map.second->update(Eigen::VectorXd(1));
-    tmp_map.second->reset();
-  }
-  for (auto& tmp_map : wrenches_)
-  {
-    tmp_map.second->update(Eigen::VectorXd(1));
-    tmp_map.second->reset();
-  }
-  waist_->update(Eigen::VectorXd(1));
-  waist_->reset();
-  com_->update(Eigen::VectorXd(1));
-  com_->reset();
-
-  change_control_mode_ = false;
-}
-
-void IDProblem::activateComZ(bool active)
-{
-  activate_com_z_ = active;
-}
-
-void IDProblem::activateAngularMomentum(bool active)
-{
-  activate_angular_momentum_ = active;
-}
-
-void IDProblem::activateJointPositionLimits(bool active)
-{
-  activate_joint_position_limits_ = active;
-}
-
-void IDProblem::activatePostural(bool active)
-{
-  activate_postural_ = active;
-}
-
-void IDProblem::setRegularization(double regularization)
-{
-  if(regularization > 0.0 && regularization < 1.0)
-    regularization_value_ = regularization;
-  else
-    PRINT_WARN_NAMED(CLASS_NAME,"Regularization value has to be set between 0 and 1!");
-}
-
-void IDProblem::setForcesMinimizationWeight(double weight)
-{
-  if(weight>=0.0)
-    min_forces_weight_ = weight;
-  else
-    PRINT_WARN_NAMED(CLASS_NAME,"Weight value has to be greater equal than 0!");
-}
-
-void IDProblem::setJointAccelerationMinimizationWeight(double weight)
-{
-  if(weight>=0.0)
-    min_qddot_weight_ = weight;
-  else
-    PRINT_WARN_NAMED(CLASS_NAME,"Weight value has to be greater equal than 0!");
-}
-
-const std::map<string, Cartesian::Ptr> &IDProblem::getFootTasks() const
-{
-  return feet_;
-}
-
-const std::map<string, Cartesian::Ptr> &IDProblem::getArmTasks() const
-{
-  return arms_;
-}
-
-const std::map<string, Wrench::Ptr> &IDProblem::getWrenchTasks() const
-{
-  return wrenches_;
-}
-
-const Cartesian::Ptr &IDProblem::getWaistTask() const
-{
-  return waist_;
-}
-
-const Com::Ptr &IDProblem::getComTask() const
-{
-  return com_;
-}
-
-void IDProblem::setFrictionConesR(const Eigen::Matrix3d& R)
-{
-   fc_.first = R;
-}
-
-void IDProblem::setFootReference(const std::string& foot_name, const Eigen::Affine3d& pose_ref, const Eigen::Vector6d& vel_ref, const std::string& reference_frame)
-{
-  if(reference_frame == model_->getBaseLinkName())
-    feet_[foot_name]->setReference(pose_ref,vel_ref);
-  else if(reference_frame == WORLD_FRAME_NAME)
-  {
-    tmp_affine3d_.setIdentity();
-    tmp_affine3d_ = model_->getBasePoseInWorld().inverse(); // base_T_world
-    tmp_vector6d_.setZero();
-    tmp_vector3d_ = vel_ref.head(3);
-    tmp_vector6d_.head(3) = tmp_affine3d_.linear() * tmp_vector3d_;
-    tmp_affine3d_ = tmp_affine3d_*pose_ref;
-    feet_[foot_name]->setReference(tmp_affine3d_,tmp_vector6d_);
-  }
-  else
-    throw std::runtime_error("Wrong reference frame, can not set the foot references!");
-}
-
-void IDProblem::setLowerForceBound(const double& x_force,const double& y_force,const double& z_force)
+void IDProblem::setLowerForceBound(const double& x_force, const double& y_force, const double& z_force)
 {
   x_force_lower_lim_ = x_force;
   y_force_lower_lim_ = y_force;
   z_force_lower_lim_ = z_force;
-  PRINT_INFO_NAMED(CLASS_NAME,"Set x force lower lim to: "<<x_force);
-  PRINT_INFO_NAMED(CLASS_NAME,"Set y force lower lim to: "<<y_force);
-  PRINT_INFO_NAMED(CLASS_NAME,"Set z force lower lim to: "<<z_force);
+}
+void IDProblem::setLowerForceBoundX(const double& f) { x_force_lower_lim_ = f; }
+void IDProblem::setLowerForceBoundY(const double& f) { y_force_lower_lim_ = f; }
+void IDProblem::setLowerForceBoundZ(const double& f) { z_force_lower_lim_ = f; }
+
+void IDProblem::activateComZ(bool active) { activate_com_z_ = active; }
+void IDProblem::activateAngularMomentum(bool active) { activate_angular_momentum_ = active; }
+void IDProblem::activatePostural(bool active) { activate_postural_ = active; }
+void IDProblem::activateJointPositionLimits(bool active) { activate_joint_position_limits_ = active; }
+
+void IDProblem::setRegularization(double r)
+{
+  if(r <= 0.0 || r >= 1.0) return;
+  regularization_value_ = r;
 }
 
-void IDProblem::setLowerForceBoundX(const double& force)
+void IDProblem::setForcesMinimizationWeight(double w) { if(w>=0.0) min_forces_weight_ = w; }
+void IDProblem::setJointAccelerationMinimizationWeight(double w) { if(w>=0.0) min_qddot_weight_ = w; }
+
+const std::map<std::string,Cartesian::Ptr>& IDProblem::getFootTasks() const { return feet_; }
+const std::map<std::string,Cartesian::Ptr>& IDProblem::getArmTasks() const { return arms_; }
+const std::map<std::string,Wrench::Ptr>& IDProblem::getWrenchTasks() const { return wrenches_; }
+const Cartesian::Ptr& IDProblem::getWaistTask() const { return waist_; }
+const Com::Ptr& IDProblem::getComTask() const { return com_; }
+
+void IDProblem::activateExternalReferences(bool activate)
 {
-  x_force_lower_lim_ = force;
-  PRINT_INFO_NAMED(CLASS_NAME,"Set x force lower lim to: "<<force);
+  for(const auto& fn : foot_names_) feet_[fn]->OPTIONS.set_ext_reference = activate;
+  for(const auto& fn : foot_names_) wrenches_[fn]->OPTIONS.set_ext_reference = activate;
+  waist_->OPTIONS.set_ext_reference = activate;
+  postural_->OPTIONS.set_ext_reference = activate;
+  com_->OPTIONS.set_ext_reference = activate;
 }
 
-void IDProblem::setLowerForceBoundY(const double& force)
+void IDProblem::reset()
 {
-  y_force_lower_lim_ = force;
-  PRINT_INFO_NAMED(CLASS_NAME,"Set y force lower lim to: "<<force);
+  for(auto& kv : arms_)     { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
+  for(auto& kv : feet_)     { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
+  for(auto& kv : wrenches_) { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
+  waist_->update(Eigen::VectorXd(1)); waist_->reset();
+  com_->update(Eigen::VectorXd(1));   com_->reset();
+
+  change_control_mode_ = false;
 }
 
-void IDProblem::setLowerForceBoundZ(const double& force)
+void IDProblem::setFootReference(const std::string& foot_name,
+                                 const Eigen::Affine3d& pose_ref,
+                                 const Eigen::Vector6d& vel_ref,
+                                 const std::string& reference_frame)
 {
-  z_force_lower_lim_ = force;
-  PRINT_INFO_NAMED(CLASS_NAME,"Set z force lower lim to: "<<force);
-}
-
-void IDProblem::setControlMode(mode_t mode)
-{
-  if(control_mode_!=mode)
-  {
-    control_mode_ = mode;
-    change_control_mode_ = true;
+  if(reference_frame == model_->getBaseLinkName()) {
+    feet_.at(foot_name)->setReference(pose_ref, vel_ref);
+    return;
   }
-  else
-    change_control_mode_ = false;
-}
-
-void IDProblem::update()
-{
-  // Update the mu and the wrench limits
-  wrench_lower_lims_(0) = x_force_lower_lim_;
-  wrench_lower_lims_(1) = y_force_lower_lim_;
-  wrench_lower_lims_(2) = z_force_lower_lim_;
-  for (auto& tmp_map : feet_)
-  {
-    friction_cones_->getFrictionCone(tmp_map.first)->setFrictionCone(fc_);
-    if(!wrenches_lims_->getWrenchLimits(tmp_map.first)->isReleased())
-      wrenches_lims_->getWrenchLimits(tmp_map.first)->setWrenchLimits(wrench_lower_lims_,wrench_upper_lims_);
+  if(reference_frame == WORLD_FRAME_NAME) {
+    tmp_affine3d_ = model_->getBasePoseInWorld().inverse(); // base_T_world
+    tmp_vector6d_.setZero();
+    tmp_vector6d_.head<3>() = tmp_affine3d_.linear() * vel_ref.head<3>();
+    tmp_affine3d_ = tmp_affine3d_ * pose_ref;
+    feet_.at(foot_name)->setReference(tmp_affine3d_, tmp_vector6d_);
+    return;
   }
-
-  // When switching mode initialize the wrenches and base and reset the tasks
-  // and activate or deactivate the external references
-  if(change_control_mode_)
-  {
-    if(control_mode_ == EXT)
-    {
-      PRINT_INFO_NAMED(CLASS_NAME,"Change control mode to EXT");
-      for (unsigned int i=0; i<foot_names_.size(); i++)
-      {
-        wrenches_[foot_names_[i]]->setReference(contact_wrenches_[i]);
-        feet_[foot_names_[i]]->setLambda(1.,1.);
-      }
-      waist_->setReference(model_->getBasePoseInWorld());
-      model_->getCOM(tmp_vector3d_);
-      tmp_vector3d_1_.setZero();
-      com_->setReference(tmp_vector3d_,tmp_vector3d_1_);
-      reset();
-      activateExternalReferences(true);
-    }
-    else if (control_mode_ == WPG)
-    { 
-      PRINT_INFO_NAMED(CLASS_NAME,"Change control mode to WPG");
-      for (unsigned int i=0; i<foot_names_.size(); i++)
-      {
-        wrenches_[foot_names_[i]]->setReference(contact_wrenches_[i]);
-        feet_[foot_names_[i]]->setBaseLink(WORLD_FRAME_NAME);
-        feet_[foot_names_[i]]->setLambda(0.,0.);
-      }
-      waist_->setReference(model_->getBasePoseInWorld());
-      model_->getCOM(tmp_vector3d_);
-      tmp_vector3d_1_.setZero();
-      com_->setReference(tmp_vector3d_,tmp_vector3d_1_);
-      reset();
-      activateExternalReferences(false);
-    }
-  }
-
-  // Update the problem based on selected control mode
-  switch (control_mode_)
-  {
-    case WPG:
-      wpg_stack_->update(Eigen::VectorXd(1));
-      break;
-    case EXT:
-      mpc_stack_->update(Eigen::VectorXd(1));
-      break;
-    case MPC:
-      mpc_stack_->update(Eigen::VectorXd(1));
-      break;
-  }
+  throw std::runtime_error("Wrong reference frame in setFootReference()");
 }
 
-bool IDProblem::_solve(const std::unique_ptr<solvers::iHQP> &solver, Eigen::VectorXd &tau)
-{
-  bool res_solv = false;
-  bool res_id = false;
-  if (solver)
-  {
-    update();
-    res_solv = solver->solve(x_);
-    if(res_solv)
-      res_id = id_->computedTorque(x_, tau, qddot_, contact_wrenches_);
-  }
-
-  // Update the costs
-#ifdef COMPUTE_COST
-  for (auto& tmp_map : feet_)
-    tmp_map.second->updateCost(x_);
-  for (auto& tmp_map : arms_)
-    tmp_map.second->updateCost(x_);
-  for (auto& tmp_map : wrenches_)
-    tmp_map.second->updateCost(x_);
-  waistRPY_->updateCost(x_);
-  com_->updateCost(x_);
-  postural_->updateCost(x_);
-  angular_momentum_->updateCost(x_);
-#endif
-
-  return (res_solv && res_id);
-}
-
-bool IDProblem::solve(Eigen::VectorXd& tau)
-{
-  switch (control_mode_)
-  {
-    case WPG:
-      return _solve(wpg_solver_,tau);
-    case EXT:
-      return _solve(mpc_solver_,tau);
-    case MPC:
-      return _solve(mpc_solver_,tau);
-    default:
-      return false;
-  }
-}
-
-const std::vector<Eigen::Vector6d>& IDProblem::getContactWrenches() const
-{
-  return contact_wrenches_;
-}
-
-const Eigen::VectorXd& IDProblem::getJointAccelerations() const
-{
-  return qddot_;
-}
-
-void IDProblem::setPosture(const Eigen::MatrixXd& Kp, const Eigen::MatrixXd& Kd, const Eigen::VectorXd& q)
-{
-  postural_->setGains(Kp,Kd);
-  postural_->setReference(q);
-}
-
-void IDProblem::swingWithFoot(const std::string& foot_name, const std::string& ref_frame)
-{
-  feet_[foot_name]->setBaseLink(ref_frame);
-  feet_[foot_name]->setLambda(1.,1.);
-  wrenches_lims_->getWrenchLimits(foot_name)->releaseContact(true);
-  torque_lims_->disableContact(foot_name);
-}
-
-void IDProblem::stanceWithFoot(const std::string &foot_name, const std::string& ref_frame)
-{
-  feet_[foot_name]->setBaseLink(ref_frame);
-  feet_[foot_name]->setLambda(0.,0.);
-  wrenches_lims_->getWrenchLimits(foot_name)->releaseContact(false);
-  torque_lims_->enableContact(foot_name);
-}
-
-void IDProblem::publish()
-{
-
-  for (auto& tmp_map : feet_)
-    tmp_map.second->publish();
-  for (auto& tmp_map : arms_)
-    tmp_map.second->publish();
-  waist_->publish();
-  com_->publish();
-  postural_->publish();
-  angular_momentum_->publish();
-
-}
-
-void IDProblem::setWaistReference(const Eigen::Matrix3d& Rot, const double& z, const double& z_vel) // FIXME Give full position?
+void IDProblem::setWaistReference(const Eigen::Matrix3d& Rot, const double& z, const double& z_vel)
 {
   tmp_vector6d_.setZero();
   tmp_affine3d_.setIdentity();
   tmp_affine3d_.linear() = Rot;
   tmp_affine3d_.translation().z() = z;
   tmp_vector6d_(2) = z_vel;
-  waist_->setReference(tmp_affine3d_,tmp_vector6d_);
+  waist_->setReference(tmp_affine3d_, tmp_vector6d_);
 }
 
 void IDProblem::setComReference(const Eigen::Vector3d& position, const Eigen::Vector3d& velocity)
 {
-  com_->setReference(position,velocity);
+  com_->setReference(position, velocity);
 }
 
-void IDProblem::activateExternalReferences(bool activate)
+void IDProblem::setPosture(const Eigen::MatrixXd& Kp, const Eigen::MatrixXd& Kd, const Eigen::VectorXd& q)
 {
-  // NOTE: for the moment, the arms are always controlled by external references ie. topics or markers
-  for(unsigned int i=0; i<foot_names_.size(); i++)
-    feet_[foot_names_[i]]->OPTIONS.set_ext_reference = activate;
-  for(unsigned int i=0; i<foot_names_.size(); i++)
-    wrenches_[foot_names_[i]]->OPTIONS.set_ext_reference = activate;
-  waist_->OPTIONS.set_ext_reference = activate;
-  postural_->OPTIONS.set_ext_reference = activate;
-  com_->OPTIONS.set_ext_reference = activate;
+  postural_->setGains(Kp, Kd);
+  postural_->setReference(q);
 }
 
-} // namespace
+void IDProblem::swingWithFoot(const std::string& foot_name, const std::string& ref_frame)
+{
+  feet_.at(foot_name)->setBaseLink(ref_frame);
+  feet_.at(foot_name)->setLambda(1., 1.);
+
+  contact_enabled_[foot_name] = false;
+
+  if(force_bounds_.count(foot_name)) force_bounds_.at(foot_name)->releaseContact(true);
+  if(torque_limits_) torque_limits_->disableContact(foot_name);
+}
+
+void IDProblem::stanceWithFoot(const std::string& foot_name, const std::string& ref_frame)
+{
+  feet_.at(foot_name)->setBaseLink(ref_frame);
+  feet_.at(foot_name)->setLambda(0., 0.);
+
+  contact_enabled_[foot_name] = true;
+
+  if(force_bounds_.count(foot_name)) force_bounds_.at(foot_name)->releaseContact(false);
+  if(torque_limits_) torque_limits_->enableContact(foot_name);
+}
+
+void IDProblem::publish()
+{
+  for(auto& kv : feet_) kv.second->publish();
+  for(auto& kv : arms_) kv.second->publish();
+  waist_->publish();
+  com_->publish();
+  postural_->publish();
+  angular_momentum_->publish();
+}
+
+void IDProblem::update()
+{
+  // Update limits
+  wrench_lower_lims_(0) = x_force_lower_lim_;
+  wrench_lower_lims_(1) = y_force_lower_lim_;
+  wrench_lower_lims_(2) = z_force_lower_lim_;
+
+  // Update constraints params
+  for(const auto& fn : foot_names_)
+  {
+    if(friction_cones_.count(fn))
+    {
+      friction_cones_.at(fn)->setContactRotationMatrix(fc_R_);
+      friction_cones_.at(fn)->setMu(mu_);
+      friction_cones_.at(fn)->setEnabled(contact_enabled_[fn]); // optional policy: disable on swing
+    }
+
+    if(force_bounds_.count(fn))
+    {
+      Eigen::Vector3d fmin(x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_);
+      Eigen::Vector3d fmax(wrench_upper_lims_.head<3>());
+      force_bounds_.at(fn)->setMin(fmin);
+      force_bounds_.at(fn)->setMax(fmax);
+      force_bounds_.at(fn)->releaseContact(!contact_enabled_[fn]); // release on swing
+      force_bounds_.at(fn)->setEnabled(true); // keep enabled; releaseContact controls bounds
+    }
+  }
+
+  // Tasks update with dummy x
+  Eigen::VectorXd x_dummy = Eigen::VectorXd::Zero(vars_->size());
+
+  for(auto& kv : feet_)     kv.second->update(x_dummy);
+  for(auto& kv : arms_)     kv.second->update(x_dummy);
+  for(auto& kv : wrenches_) kv.second->update(x_dummy);
+  waist_->update(x_dummy);
+  com_->update(x_dummy);
+  postural_->update(x_dummy);
+  angular_momentum_->update(x_dummy);
+}
+
+void IDProblem::setDefaultBounds(QPProblem& qp)
+{
+  qp.l.setConstant(qp.n(), -kBig());
+  qp.u.setConstant(qp.n(),  kBig());
+}
+
+void IDProblem::addLeastSquaresTerm(QPProblem& qp,
+                                   const Eigen::MatrixXd& A,
+                                   const Eigen::VectorXd& b,
+                                   const Eigen::MatrixXd& W)
+{
+  qp.H.noalias() += A.transpose() * W * A;
+  qp.g.noalias() += -A.transpose() * W * b;
+}
+
+void IDProblem::addLeastSquaresRows(QPProblem& qp,
+                                   const Eigen::MatrixXd& A,
+                                   const Eigen::VectorXd& b,
+                                   const Eigen::MatrixXd& W,
+                                   const std::vector<int>& rows)
+{
+  const int r = static_cast<int>(rows.size());
+  if(r <= 0) return;
+
+  Eigen::MatrixXd Ar(r, A.cols());
+  Eigen::VectorXd br(r);
+  Eigen::MatrixXd Wr(r, r);
+  Ar.setZero();
+  br.setZero();
+  Wr.setZero();
+
+  for(int i = 0; i < r; ++i)
+  {
+    const int ri = rows[i];
+    Ar.row(i) = A.row(ri);
+    br(i) = b(ri);
+    for(int j = 0; j < r; ++j) {
+      Wr(i,j) = W(ri, rows[j]);
+    }
+  }
+
+  addLeastSquaresTerm(qp, Ar, br, Wr);
+}
+
+void IDProblem::applyConstraintContributions(QPProblem& qp,
+                                            const std::vector<std::shared_ptr<IConstraint>>& constraints)
+{
+  // 1) merge bounds contributions (ConstraintBase only)
+  for(const auto& c : constraints)
+  {
+    if(!c) continue;
+    if(!c->enabled()) continue;
+
+    const auto* cb = dynamic_cast<const ConstraintBase*>(c.get());
+    if(cb && cb->hasBounds())
+    {
+      // IMPORTANT: bounds vectors are full-size (nvars) by your design
+      if(cb->l().size() != qp.n() || cb->u().size() != qp.n())
+        throw std::runtime_error("Constraint bounds size mismatch in " + c->name());
+
+      qp.l = qp.l.cwiseMax(cb->l());
+      qp.u = qp.u.cwiseMin(cb->u());
+    }
+  }
+
+  // 2) stack linear constraints A/lA/uA
+  int m_total = 0;
+  for(const auto& c : constraints)
+  {
+    if(!c) continue;
+    if(!c->enabled()) continue;
+    m_total += c->rows();
+  }
+
+  qp.A.resize(m_total, qp.n());
+  qp.lA.resize(m_total);
+  qp.uA.resize(m_total);
+
+  int row = 0;
+  for(const auto& c : constraints)
+  {
+    if(!c) continue;
+    if(!c->enabled()) continue;
+
+    const int mi = c->rows();
+    if(mi <= 0) continue;
+
+    if(c->cols() != qp.n())
+      throw std::runtime_error("Constraint cols mismatch in " + c->name());
+
+    if(c->A().rows() != mi || c->A().cols() != qp.n())
+      throw std::runtime_error("Constraint A size mismatch in " + c->name());
+
+    qp.A.block(row, 0, mi, qp.n()) = c->A();
+    qp.lA.segment(row, mi) = c->lA();
+    qp.uA.segment(row, mi) = c->uA();
+    row += mi;
+  }
+}
+
+bool IDProblem::buildQP(QPProblem& qp)
+{
+  qp.resize(vars_->size(), 0);
+  setDefaultBounds(qp);
+
+  qp.H.setZero();
+  qp.g.setZero();
+
+  // regularization
+  qp.H.diagonal().array() += regularization_value_;
+
+  // block diagonal minimization weights (optional)
+  if(min_qddot_weight_ > 0.0)
+  {
+    const auto& b = vars_->qddotBlock();
+    qp.H.block(b.offset, b.offset, b.dim, b.dim).diagonal().array() += min_qddot_weight_;
+  }
+
+  if(min_forces_weight_ > 0.0)
+  {
+    for(const auto& fn : foot_names_)
+    {
+      const auto& b = vars_->contactBlock(fn);
+      qp.H.block(b.offset, b.offset, b.dim, b.dim).diagonal().array() += min_forces_weight_;
+    }
+  }
+
+  // --- tasks -> LS
+  // feet XYZ only
+  for(const auto& fn : foot_names_)
+  {
+    const auto& t = *feet_.at(fn);
+    addLeastSquaresRows(qp, t.A(), t.b(), t.W(), {0,1,2});
+  }
+
+  // arms full 6D
+  for(const auto& ee : ee_names_)
+  {
+    const auto& t = *arms_.at(ee);
+    addLeastSquaresTerm(qp, t.A(), t.b(), t.W());
+  }
+
+  // waist + com split
+  {
+    const auto& w = *waist_;
+    const auto& c = *com_;
+
+    if(activate_com_z_)
+    {
+      addLeastSquaresRows(qp, w.A(), w.b(), w.W(), {3,4,5});
+      addLeastSquaresRows(qp, c.A(), c.b(), c.W(), {0,1,2});
+    }
+    else
+    {
+      addLeastSquaresRows(qp, w.A(), w.b(), w.W(), {2,3,4,5});
+      addLeastSquaresRows(qp, c.A(), c.b(), c.W(), {0,1});
+    }
+  }
+
+  if(activate_angular_momentum_)
+  {
+    const auto& t = *angular_momentum_;
+    addLeastSquaresTerm(qp, t.A(), t.b(), t.W());
+  }
+
+  if(activate_postural_)
+  {
+    const auto& t = *postural_;
+    addLeastSquaresTerm(qp, t.A(), t.b(), t.W());
+  }
+
+  // --- constraints update + merge
+  for(const auto& c : constraints_)
+  {
+    if(!c) continue;
+    if(!c->enabled()) continue;
+    c->update(x_); // can ignore x internally; safe to call
+  }
+
+  applyConstraintContributions(qp, constraints_);
+
+  // NOTE: joint position limits not yet implemented here (activate_joint_position_limits_)
+
+  return true;
+}
+
+bool IDProblem::solveQP(IQPSolver& solver, QPProblem& qp, Eigen::VectorXd& x)
+{
+  return solver.solve(qp, x);
+}
+
+bool IDProblem::computeTauFromSolution(const Eigen::VectorXd& x, Eigen::VectorXd& tau)
+{
+  return vars_->computeTorque(*model_, x, tau, qddot_, contact_wrenches_);
+}
+
+bool IDProblem::solve(Eigen::VectorXd& tau)
+{
+  if(!initialized_) return false;
+
+  update();
+
+  if(!buildQP(qp_)) return false;
+  if(!solver_) return false;
+
+  if(!solveQP(*solver_, qp_, x_)) return false;
+
+  return computeTauFromSolution(x_, tau);
+}
+
+const std::vector<Eigen::Vector6d>& IDProblem::getContactWrenches() const { return contact_wrenches_; }
+const Eigen::VectorXd& IDProblem::getJointAccelerations() const { return qddot_; }
+
+} // namespace wolf_wbid

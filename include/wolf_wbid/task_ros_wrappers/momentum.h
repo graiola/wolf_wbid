@@ -1,51 +1,55 @@
+// ============================================================================
+// File: include/wolf_wbid/task_ros_wrappers/momentum.h
+// Updated ROS wrapper (OpenSoT-free)
+// ============================================================================
+
 /**
 WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
-
 WoLF is licensed under a license Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
-
-You should have received a copy of the license along with this
-work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
-**/
+*/
 
 #ifndef TASK_ROS_WRAPPERS_MOMENTUM_H
 #define TASK_ROS_WRAPPERS_MOMENTUM_H
 
-// ROS
+// ROS msg (you used CartesianTask msg for this wrapper)
 #include <wolf_msgs/CartesianTask.h>
 
 // WoLF
 #include <wolf_wbid/task_ros_wrappers/handler.h>
+#include <wolf_wbid/task_interface.h>
+
+// OpenSoT-free task
+#include <wolf_wbid/wbid/tasks/angular_momentum_task.h>
+
+// Robot & vars
+#include <wolf_wbid/quadruped_robot.h>
+#include <wolf_wbid/wbid/id_variables.h>
+
+// Utils
+#include <wolf_controller_utils/converters.h>
 
 namespace wolf_wbid {
 
-// AngularMomentum
 class AngularMomentumImpl : public AngularMomentum, public TaskRosHandler<wolf_msgs::CartesianTask>
 {
-
 public:
-
-  typedef std::shared_ptr<AngularMomentumImpl> Ptr;
+  using Ptr = std::shared_ptr<AngularMomentumImpl>;
 
   AngularMomentumImpl(const std::string& robot_name,
-                      XBot::ModelInterface& robot,
-                      const OpenSoT::AffineHelper& qddot,
+                      QuadrupedRobot& robot,
+                      const IDVariables& vars,
+                      const std::string& task_id = "angular_momentum",
                       const double& period = 0.001);
 
-  virtual void registerReconfigurableVariables() override;
+  void registerReconfigurableVariables() override;
+  void loadParams() override;
+  void updateCost(const Eigen::VectorXd& x) override;
 
-  virtual void loadParams() override;
-
-  virtual void updateCost(const Eigen::VectorXd& x) override;
-
-  virtual void update(const Eigen::VectorXd& x);
-
-  virtual void publish();
-
-  virtual bool reset() override;
-
+  void update(const Eigen::VectorXd& x);   // apply buffers + task update
+  void publish() override;
+  bool reset() override;
 };
 
-} // namespace
+} // namespace wolf_wbid
 
 #endif // TASK_ROS_WRAPPERS_MOMENTUM_H
-

@@ -38,7 +38,6 @@ include_directories(
     third_party/XBotInterface/include
     third_party/XBotInterface/srdfdom_advr/include
     third_party/ModelInterfaceRBDL/include
-    third_party/OpenSoT/include
     ${EIGEN3_INCLUDE_DIRS}
     ${tf2_INCLUDE_DIRS}
     ${tf2_ros_INCLUDE_DIRS}
@@ -57,7 +56,6 @@ add_subdirectory(third_party/rbdl)
 add_subdirectory(third_party/MatLogger2)
 add_subdirectory(third_party/XBotInterface)
 add_subdirectory(third_party/ModelInterfaceRBDL)
-add_subdirectory(third_party/OpenSoT)
 
 # ROS
 find_package(catkin QUIET)
@@ -73,7 +71,6 @@ if(${catkin_FOUND})
         third_party/XBotInterface/include
         third_party/XBotInterface/srdfdom_advr/include
         third_party/ModelInterfaceRBDL/include
-        third_party/OpenSoT/include
       LIBRARIES
         quadruped_robot
         cartesian_trajectory
@@ -81,9 +78,6 @@ if(${catkin_FOUND})
         task_wrappers
         rbdl
         rbdl_urdfreader
-        OpenSoT
-        OpenSotBackEndQPOases
-        OpenSotBackEndeiQuadProg
         XBotInterface
         XBotCoreModel
         ModelInterfaceRBDL
@@ -107,9 +101,6 @@ elseif(${ament_cmake_FOUND})
         task_wrappers
         rbdl
         rbdl_urdfreader
-        OpenSoT
-        OpenSotBackEndQPOases
-        OpenSotBackEndeiQuadProg
         XBotInterface
         XBotCoreModel
         ModelInterfaceRBDL
@@ -123,7 +114,6 @@ add_library(quadruped_robot SHARED
     src/quadruped_robot.cpp)
 target_link_libraries(quadruped_robot
     ${wolf_controller_utils_LIBRARIES}
-    OpenSoT
     XBotInterface
     XBotCoreModel
     ModelInterfaceRBDL)
@@ -152,7 +142,6 @@ target_link_libraries(task_wrappers
     ${wolf_controller_utils_LIBRARIES}
     ${wolf_msgs_LIBRARIES}
     ${interactive_markers_LIBRARIES}
-    OpenSoT
     XBotInterface
     XBotCoreModel
     ModelInterfaceRBDL
@@ -160,11 +149,24 @@ target_link_libraries(task_wrappers
     realtime_tools # FIX FOR ROS HUMBLE
     )
 
-add_library(id_problem SHARED src/id_problem.cpp)
+add_library(id_problem SHARED 
+    src/id_problem.cpp
+    src/wbid/id_variables.cpp
+    src/wbid/constraints/friction_cone_constraint.cpp
+    src/wbid/constraints/friction_cones_constraint.cpp
+    src/wbid/constraints/contact_force_bounds_constraint.cpp
+    src/wbid/constraints/torque_limits_constraint.cpp
+    src/wbid/tasks/aggregated_task_lsq.cpp
+    src/wbid/tasks/angular_momentum_task.cpp
+    src/wbid/tasks/cartesian_task.cpp
+    src/wbid/tasks/com_task.cpp
+    src/wbid/tasks/minimize_variable_task.cpp
+    src/wbid/tasks/postural_task.cpp
+    src/wbid/tasks/wrench_task.cpp
+)
 target_link_libraries(id_problem
     quadruped_robot 
     task_wrappers 
-    OpenSoT
     XBotInterface
     XBotCoreModel
     ModelInterfaceRBDL)
@@ -175,41 +177,6 @@ install(
   DESTINATION ${CMAKE_INSTALL_PREFIX}/include
 )
 
-#install(
-#  DIRECTORY third_party/XBotInterface/include/
-#  DESTINATION ${CMAKE_INSTALL_PREFIX}/include
-#)
-#install(
-#  DIRECTORY third_party/ModelInterfaceRBDL/include/
-#  DESTINATION ${CMAKE_INSTALL_PREFIX}/include
-#)
-#install(
-#  DIRECTORY third_party/OpenSoT/include/
-#  DESTINATION ${CMAKE_INSTALL_PREFIX}/include
-#)
-
-#install(
-#  TARGETS
-#    rbdl
-#    rbdl_urdfreader
-#    quadruped_robot
-#    cartesian_trajectory
-#    id_problem
-#    task_wrappers
-#    OpenSoT
-#    OpenSotBackEndQPOases
-#    OpenSotBackEndeiQuadProg
-#    XBotInterface
-#    XBotCoreModel
-#    ModelInterfaceRBDL
-#    matlogger2
-#  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-#  LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-#  RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
-#)
-
-
-
 install(TARGETS
         rbdl
         rbdl_urdfreader
@@ -217,9 +184,6 @@ install(TARGETS
         cartesian_trajectory
         id_problem
         task_wrappers
-        OpenSoT
-        OpenSotBackEndQPOases
-        OpenSotBackEndeiQuadProg
         XBotInterface
         XBotCoreModel
         ModelInterfaceRBDL

@@ -1,44 +1,37 @@
 /**
  * @file cartesian.cpp
  * @author Gennaro Raiola
- * @date 24 April, 2023
- * @brief This file contains the cartesian task wrapper for ROS
+ * @brief Cartesian task wrapper for ROS (OpenSoT-free)
  */
 
-// WoLF
 #include <wolf_wbid/task_ros_wrappers/cartesian.h>
-#include <wolf_controller_utils/converters.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2_eigen/tf2_eigen.h>
+
+#include <wolf_wbid/quadruped_robot.h>
+#include <wolf_wbid/wbid/id_variables.h>
+
 #include <geometry_msgs/TransformStamped.h>
+#include <tf2/transform_datatypes.h>
 
 using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
 CartesianImpl::CartesianImpl(const std::string& robot_name,
-                     const std::string& task_id,
-                     const XBot::ModelInterface& robot,
-                     const std::string& distal_link,
-                     const std::string& base_link,
-                     const OpenSoT::AffineHelper& qddot,
-                     const double& period,
-                     const bool& use_mesh)
-  :Cartesian(robot_name,
-             task_id,
-             robot,
-             distal_link,
-             base_link,
-             qddot,
-             period,
-             use_mesh)
-  ,TaskRosHandler<wolf_msgs::CartesianTask>(task_id,robot_name,period)
-  ,is_continuous_(true)
-  ,interactive_marker_server_(robot_name+"/wolf_controller/marker/"+_task_id)
-  ,use_mesh_(use_mesh)
+                             const std::string& task_id,
+                             QuadrupedRobot& robot,
+                             const std::string& distal_link,
+                             const std::string& base_link,
+                             const IDVariables& vars,
+                             const double& period,
+                             const bool& use_mesh)
+: Cartesian(robot_name, task_id, robot, distal_link, base_link, vars, period, use_mesh)
+, TaskRosHandler<wolf_msgs::CartesianTask>(task_id, robot_name, period)
+, robot_(robot)
+, interactive_marker_server_(robot_name + "/wolf_controller/marker/" + task_id)
+, use_mesh_(use_mesh)
 {
-
   // Get the urdf (used for the mesh)
-  urdf_ = robot.getUrdf();
+  // If QuadrupedRobot does not expose getUrdf(), replace with a param-based URDF load here.
+  urdf_ = robot_.getUrdf();
 
   // Get the urdf links (used for the base frame selection)
   urdf_.getLinks(links_);
@@ -51,7 +44,7 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
 
   // Create the marker
   control_type_ = visualization_msgs::InteractiveMarkerControl::MOVE_ROTATE_3D;
-  makeMarker(getDistalLink(),getBaseLink(),static_cast<unsigned int>(control_type_),true);
+  makeMarker(getDistalLink(), getBaseLink(), static_cast<unsigned int>(control_type_), true);
   makeMenu();
   interactive_marker_server_.applyChanges();
 
@@ -62,54 +55,59 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
   waypoints_pub_ = nh_.advertise<geometry_msgs::PoseArray>(task_id + "/wp", 1, true);
 
   // Create the reference subscriber
-  reference_sub_ = nh_.subscribe("reference/"+_task_id, 1000, &CartesianImpl::referenceCallback, this);
+  reference_sub_ = nh_.subscribe("reference/" + task_id, 1000, &CartesianImpl::referenceCallback, this);
 }
 
 void CartesianImpl::registerReconfigurableVariables()
 {
-  double lambda1 = getLambda();
-  double lambda2 = getLambda2();
-  double weight  = getWeight()(0,0);
-  ddr_server_->registerVariable<double>("set_lambda_1",    lambda1,     boost::bind(&TaskWrapperInterface::setLambda1,this,_1)    ,"set lambda 1"   ,0.0,1000.0);
-  ddr_server_->registerVariable<double>("set_lambda_2",    lambda2,     boost::bind(&TaskWrapperInterface::setLambda2,this,_1)    ,"set lambda 2"   ,0.0,1000.0);
-  ddr_server_->registerVariable<double>("set_weight_diag", weight,      boost::bind(&TaskWrapperInterface::setWeightDiag,this,_1) ,"set weight diag",0.0,1000.0);
-  Eigen::Matrix6d Kp = getKp();
-  ddr_server_->registerVariable<double>("kp_x",            Kp(0,0), boost::bind(&TaskWrapperInterface::setKpX,this,_1)            ,"Kp(0,0)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kp_y",            Kp(1,1), boost::bind(&TaskWrapperInterface::setKpY,this,_1)            ,"Kp(1,1)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kp_z",            Kp(2,2), boost::bind(&TaskWrapperInterface::setKpZ,this,_1)            ,"Kp(2,2)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kp_roll",         Kp(3,3), boost::bind(&TaskWrapperInterface::setKpRoll,this,_1)         ,"Kp(3,3)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kp_pitch",        Kp(4,4), boost::bind(&TaskWrapperInterface::setKpPitch,this,_1)        ,"Kp(4,4)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kp_yaw",          Kp(5,5), boost::bind(&TaskWrapperInterface::setKpYaw,this,_1)          ,"Kp(5,5)", 0.0, 10000.0);
-  Eigen::Matrix6d Kd = getKd();
-  ddr_server_->registerVariable<double>("kd_x",            Kd(0,0), boost::bind(&TaskWrapperInterface::setKdX,this,_1)            ,"Kd(0,0)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kd_y",            Kd(1,1), boost::bind(&TaskWrapperInterface::setKdY,this,_1)            ,"Kd(1,1)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kd_z",            Kd(2,2), boost::bind(&TaskWrapperInterface::setKdZ,this,_1)            ,"Kd(2,2)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kd_roll",         Kd(3,3), boost::bind(&TaskWrapperInterface::setKdRoll,this,_1)         ,"Kd(3,3)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kd_pitch",        Kd(4,4), boost::bind(&TaskWrapperInterface::setKdPitch,this,_1)        ,"Kd(4,4)", 0.0, 10000.0);
-  ddr_server_->registerVariable<double>("kd_yaw",          Kd(5,5), boost::bind(&TaskWrapperInterface::setKdYaw,this,_1)          ,"Kd(5,5)", 0.0, 10000.0);
+  const double lambda1 = getLambda();
+  const double lambda2 = getLambda2();
+  const double weight  = getWeight()(0,0);
+
+  ddr_server_->registerVariable<double>("set_lambda_1", lambda1,
+      boost::bind(&TaskWrapperInterface::setLambda1, this, _1),
+      "set lambda 1", 0.0, 1000.0);
+
+  ddr_server_->registerVariable<double>("set_lambda_2", lambda2,
+      boost::bind(&TaskWrapperInterface::setLambda2, this, _1),
+      "set lambda 2", 0.0, 1000.0);
+
+  ddr_server_->registerVariable<double>("set_weight_diag", weight,
+      boost::bind(&TaskWrapperInterface::setWeightDiag, this, _1),
+      "set weight diag", 0.0, 1000.0);
+
+  const Eigen::Matrix<double,6,6> Kp = getKp();
+  ddr_server_->registerVariable<double>("kp_x",     Kp(0,0), boost::bind(&TaskWrapperInterface::setKpX,this,_1),     "Kp(0,0)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kp_y",     Kp(1,1), boost::bind(&TaskWrapperInterface::setKpY,this,_1),     "Kp(1,1)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kp_z",     Kp(2,2), boost::bind(&TaskWrapperInterface::setKpZ,this,_1),     "Kp(2,2)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kp_roll",  Kp(3,3), boost::bind(&TaskWrapperInterface::setKpRoll,this,_1),  "Kp(3,3)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kp_pitch", Kp(4,4), boost::bind(&TaskWrapperInterface::setKpPitch,this,_1), "Kp(4,4)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kp_yaw",   Kp(5,5), boost::bind(&TaskWrapperInterface::setKpYaw,this,_1),   "Kp(5,5)", 0.0, 10000.0);
+
+  const Eigen::Matrix<double,6,6> Kd = getKd();
+  ddr_server_->registerVariable<double>("kd_x",     Kd(0,0), boost::bind(&TaskWrapperInterface::setKdX,this,_1),     "Kd(0,0)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kd_y",     Kd(1,1), boost::bind(&TaskWrapperInterface::setKdY,this,_1),     "Kd(1,1)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kd_z",     Kd(2,2), boost::bind(&TaskWrapperInterface::setKdZ,this,_1),     "Kd(2,2)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kd_roll",  Kd(3,3), boost::bind(&TaskWrapperInterface::setKdRoll,this,_1),  "Kd(3,3)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kd_pitch", Kd(4,4), boost::bind(&TaskWrapperInterface::setKdPitch,this,_1), "Kd(4,4)", 0.0, 10000.0);
+  ddr_server_->registerVariable<double>("kd_yaw",   Kd(5,5), boost::bind(&TaskWrapperInterface::setKdYaw,this,_1),   "Kd(5,5)", 0.0, 10000.0);
+
   ddr_server_->publishServicesTopics();
 }
 
 void CartesianImpl::loadParams()
 {
-
   double lambda1, lambda2, weight;
-  if (!nh_.getParam("gains/"+_task_id+"/lambda1" , lambda1))
-  {
-    ROS_DEBUG("No lambda1 gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
+
+  if (!nh_.getParam("gains/"+task_name_+"/lambda1", lambda1))
     lambda1 = getLambda();
-  }
-  if (!nh_.getParam("gains/"+_task_id+"/lambda2" , lambda2))
-  {
-    ROS_DEBUG("No lambda2 gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
+
+  if (!nh_.getParam("gains/"+task_name_+"/lambda2", lambda2))
     lambda2 = getLambda2();
-  }
-  if (!nh_.getParam("gains/"+_task_id+"/weight" , weight))
-  {
-    ROS_DEBUG("No weight gain given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
+
+  if (!nh_.getParam("gains/"+task_name_+"/weight", weight))
     weight = getWeight()(0,0);
-  }
-  // Check if the values are positive
+
   if(lambda1 < 0 || lambda2 < 0 || weight < 0)
     throw std::runtime_error("Lambda and weight must be positive!");
 
@@ -117,35 +115,34 @@ void CartesianImpl::loadParams()
   buffer_lambda2_ = lambda2;
   buffer_weight_diag_ = weight;
 
-  setLambda(lambda1,lambda2);
-  setWeight(weight);
+  setLambda(lambda1, lambda2);
 
-  Eigen::Matrix6d Kp = Eigen::Matrix6d::Zero();
-  Eigen::Matrix6d Kd = Eigen::Matrix6d::Zero();
+  Eigen::Matrix<double,6,6> W = Eigen::Matrix<double,6,6>::Identity();
+  W.diagonal().setConstant(weight);
+  setWeight(W);
+
+  Eigen::Matrix<double,6,6> Kp = Eigen::Matrix<double,6,6>::Zero();
+  Eigen::Matrix<double,6,6> Kd = Eigen::Matrix<double,6,6>::Zero();
 
   bool use_identity = false;
-  for(unsigned int i=0; i<wolf_controller_utils::_cartesian_names.size(); i++)
-  {
-    if (!nh_.getParam("gains/"+_task_id+"/Kp/" + wolf_controller_utils::_cartesian_names[i] , Kp(i,i)))
-    {
-      ROS_DEBUG("No Kp.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_cartesian_names[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
-      use_identity = true;
-    }
-    if (!nh_.getParam("gains/"+_task_id+"/Kd/" + wolf_controller_utils::_cartesian_names[i] , Kd(i,i)))
-    {
-      ROS_DEBUG("No Kd.%s gain given for task %s in the namespace: %s, using an identity matrix. ",wolf_controller_utils::_cartesian_names[i].c_str(),_task_id.c_str(),nh_.getNamespace().c_str());
-      use_identity = true;
-    }
-    // Check if the values are positive
-    if(Kp(i,i)<0.0 || Kd(i,i)<0.0)
-      throw std::runtime_error("Kp and Kd must be positive definite!");
+  static const std::vector<std::string> cart_names = {"x","y","z","roll","pitch","yaw"};
 
+  for(int i=0;i<6;i++)
+  {
+    if (!nh_.getParam("gains/"+task_name_+"/Kp/"+cart_names[i], Kp(i,i)))
+      use_identity = true;
+
+    if (!nh_.getParam("gains/"+task_name_+"/Kd/"+cart_names[i], Kd(i,i)))
+      use_identity = true;
+
+    if(Kp(i,i) < 0.0 || Kd(i,i) < 0.0)
+      throw std::runtime_error("Kp and Kd must be positive!");
   }
 
   if(use_identity)
   {
-    Kp = Eigen::Matrix6d::Identity();
-    Kd = Eigen::Matrix6d::Identity();
+    Kp.setIdentity();
+    Kd.setIdentity();
   }
 
   buffer_kp_x_     = Kp(0,0);
@@ -166,20 +163,22 @@ void CartesianImpl::loadParams()
   setKd(Kd);
 
   std::string type;
-  if (!nh_.getParam("gains/"+_task_id+"/type" , type))
-    ROS_DEBUG("No gains type given for task %s in the namespace: %s, using the default value loaded from the task",_task_id.c_str(),nh_.getNamespace().c_str());
-  else
+  if(nh_.getParam("gains/"+task_name_+"/type", type))
+  {
     if(type == "acceleration")
-      setGainType(OpenSoT::tasks::acceleration::GainType::Acceleration);
-    else if (type == "force")
-      setGainType(OpenSoT::tasks::acceleration::GainType::Force);
+      setGainType(CartesianTask::GainType::Acceleration);
+    else if(type == "force")
+      setGainType(CartesianTask::GainType::Force);
     else
       throw std::runtime_error("Wrong gain type, possible values are 'acceleration' or 'force'");
+  }
 }
 
-void CartesianImpl::updateCost(const Eigen::VectorXd& x)
+void CartesianImpl::updateCost(const Eigen::VectorXd& /*x*/)
 {
-  cost_ = computeCost(x);
+  // Se vuoi replicare il costo OpenSoT (computeCost), va fatto nel QPProblem builder.
+  // Qui mettiamo un proxy stabile e utile per debug:
+  cost_ = getError().squaredNorm() + getVelocityError().squaredNorm();
 }
 
 void CartesianImpl::publish()
@@ -190,89 +189,105 @@ void CartesianImpl::publish()
     rt_pub_->msg_.header.stamp = ros::Time::now();
 
     // ACTUAL VALUES
-    getActualPose(tmp_affine3d_);
-    getActualTwist(tmp_vector6d_);
-    wolf_controller_utils::rotToRpy(tmp_affine3d_.linear(),tmp_vector3d_);
-    wolf_controller_utils::affine3dToPose(tmp_affine3d_,rt_pub_->msg_.pose_actual);
-    wolf_controller_utils::vector6dToTwist(tmp_vector6d_,rt_pub_->msg_.twist_actual);
-    wolf_controller_utils::vector3dToVector3(tmp_vector3d_,rt_pub_->msg_.rpy_actual);
+    Eigen::Affine3d T_act;
+    Eigen::Matrix<double,6,1> V_act;
+    getActualPose(T_act);
+    getActualTwist(V_act);
+
+    rotToRpy(T_act.linear(), tmp_vector3d_);
+    affine3dToPose(T_act, rt_pub_->msg_.pose_actual);
+    vector6dToTwist(V_act, rt_pub_->msg_.twist_actual);
+    vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.rpy_actual);
 
     // REFERENCE VALUES
-    getReference(tmp_affine3d_);
+    Eigen::Affine3d T_ref;
+    getReference(T_ref);
     tmp_vector6d_ = getCachedVelocityReference();
-    wolf_controller_utils::rotToRpy(tmp_affine3d_.linear(),tmp_vector3d_);
-    wolf_controller_utils::affine3dToPose(tmp_affine3d_,rt_pub_->msg_.pose_reference);
-    wolf_controller_utils::vector6dToTwist(tmp_vector6d_,rt_pub_->msg_.twist_reference);
-    wolf_controller_utils::vector3dToVector3(tmp_vector3d_,rt_pub_->msg_.rpy_reference);
+
+    rotToRpy(T_ref.linear(), tmp_vector3d_);
+    affine3dToPose(T_ref, rt_pub_->msg_.pose_reference);
+    vector6dToTwist(tmp_vector6d_, rt_pub_->msg_.twist_reference);
+    vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.rpy_reference);
 
     // COST
     rt_pub_->msg_.cost = cost_;
 
-    // PUBLISH
     rt_pub_->unlockAndPublish();
   }
 }
 
-void CartesianImpl::_update(const Eigen::VectorXd& x)
+void CartesianImpl::_updateInternal(const Eigen::VectorXd& x)
 {
   if(OPTIONS.set_ext_lambda)
-    setLambda(buffer_lambda1_,buffer_lambda2_);
+    setLambda(buffer_lambda1_, buffer_lambda2_);
+
   if(OPTIONS.set_ext_weight)
-    setWeight(buffer_weight_diag_);
+  {
+    Eigen::Matrix<double,6,6> W = Eigen::Matrix<double,6,6>::Identity();
+    W.diagonal().setConstant(buffer_weight_diag_);
+    setWeight(W);
+  }
+
   if(OPTIONS.set_ext_gains)
   {
-    tmp_matrix6d_.setZero();
-    tmp_matrix6d_(0,0) = buffer_kp_x_;
-    tmp_matrix6d_(1,1) = buffer_kp_y_;
-    tmp_matrix6d_(2,2) = buffer_kp_z_;
-    tmp_matrix6d_(3,3) = buffer_kp_roll_;
-    tmp_matrix6d_(4,4) = buffer_kp_pitch_;
-    tmp_matrix6d_(5,5) = buffer_kp_yaw_;
-    setKp(tmp_matrix6d_);
-    tmp_matrix6d_.setZero();
-    tmp_matrix6d_(0,0) = buffer_kd_x_;
-    tmp_matrix6d_(1,1) = buffer_kd_y_;
-    tmp_matrix6d_(2,2) = buffer_kd_z_;
-    tmp_matrix6d_(3,3) = buffer_kd_roll_;
-    tmp_matrix6d_(4,4) = buffer_kd_pitch_;
-    tmp_matrix6d_(5,5) = buffer_kd_yaw_;
-    setKd(tmp_matrix6d_);
+    Eigen::Matrix<double,6,6> Kp = Eigen::Matrix<double,6,6>::Zero();
+    Eigen::Matrix<double,6,6> Kd = Eigen::Matrix<double,6,6>::Zero();
+
+    Kp(0,0)=buffer_kp_x_;     Kp(1,1)=buffer_kp_y_;     Kp(2,2)=buffer_kp_z_;
+    Kp(3,3)=buffer_kp_roll_;  Kp(4,4)=buffer_kp_pitch_; Kp(5,5)=buffer_kp_yaw_;
+
+    Kd(0,0)=buffer_kd_x_;     Kd(1,1)=buffer_kd_y_;     Kd(2,2)=buffer_kd_z_;
+    Kd(3,3)=buffer_kd_roll_;  Kd(4,4)=buffer_kd_pitch_; Kd(5,5)=buffer_kd_yaw_;
+
+    setKp(Kp);
+    setKd(Kd);
   }
+
   if(OPTIONS.set_ext_reference)
   {
-    if(is_continuous_) // Direct control
+    if(is_continuous_)
     {
-      //setReference(*buffer_reference_pose_.readFromRT());
-      setReference(*buffer_reference_pose_.readFromRT(),*buffer_reference_twist_.readFromRT());
+      setReference(*buffer_reference_pose_.readFromRT(),
+                   *buffer_reference_twist_.readFromRT());
     }
-    else // Interpolation
+    else
     {
       trj_->update(period_);
-      trj_->getReference(tmp_affine3d_,&tmp_vector6d_);
-      setReference(tmp_affine3d_,tmp_vector6d_);
+      trj_->getReference(tmp_affine3d_, &tmp_vector6d_);
+      setReference(tmp_affine3d_, tmp_vector6d_);
     }
   }
-  OpenSoT::tasks::acceleration::Cartesian::_update(x);
+
+  // Core task update: build A,b from x
+  update(x);
 }
 
 bool CartesianImpl::reset()
 {
-  bool res = OpenSoT::tasks::acceleration::Cartesian::reset(); // Task's reset
-  makeMarker(getDistalLink(),getBaseLink(),static_cast<unsigned int>(control_type_),true);
+  CartesianTask::reset();
+
+  makeMarker(getDistalLink(), getBaseLink(),
+             static_cast<unsigned int>(control_type_), true);
   menu_handler_.reApply(interactive_marker_server_);
   interactive_marker_server_.applyChanges();
+
   waypoints_.clear();
   publishWP(waypoints_);
   trj_->reset();
-  getActualPose(tmp_affine3d_);
-  buffer_reference_pose_.initRT(tmp_affine3d_);
-  tmp_vector6d_.setZero();
-  buffer_reference_twist_.initRT(tmp_vector6d_);
 
-  return res;
+  // init reference buffers from current pose
+  Eigen::Affine3d pose;
+  getActualPose(pose);
+  buffer_reference_pose_.writeFromNonRT(pose);
+
+  Eigen::Matrix<double,6,1> twist = Eigen::Matrix<double,6,1>::Zero();
+  buffer_reference_twist_.writeFromNonRT(twist);
+
+  return true;
 }
 
-void CartesianImpl::makeMarker(const std::string &distal_link, const std::string &base_link, unsigned int interaction_mode, bool show)
+void CartesianImpl::makeMarker(const std::string &distal_link, const std::string &base_link,
+                               unsigned int interaction_mode, bool show)
 {
   ROS_DEBUG("Creating marker %s -> %s\n", base_link.c_str(), distal_link.c_str());
 
@@ -285,26 +300,31 @@ void CartesianImpl::makeMarker(const std::string &distal_link, const std::string
   // Insert STL
   makeSTLControl(interactive_marker_);
   interactive_marker_.controls[0].interaction_mode = interaction_mode;
+
   if(show)
   {
     createInteractiveMarkerControl(1,1,0,0,interaction_mode);
     createInteractiveMarkerControl(1,0,1,0,interaction_mode);
     createInteractiveMarkerControl(1,0,0,1,interaction_mode);
   }
+
   Eigen::Affine3d start_pose;
   getActualPose(start_pose);
   affine3dToVisualizationPose(start_pose, interactive_marker_);
-  interactive_marker_server_.insert(interactive_marker_,boost::bind(&CartesianImpl::processFeedback, this, _1));
+
+  interactive_marker_server_.insert(interactive_marker_,
+                                    boost::bind(&CartesianImpl::processFeedback, this, _1));
 }
 
 void CartesianImpl::createInteractiveMarkerControl(const double qw, const double qx, const double qy, const double qz,
-                                               const unsigned int interaction_mode)
+                                                   const unsigned int interaction_mode)
 {
   visualization_msgs::InteractiveMarkerControl tmp_control;
   tmp_control.orientation.w = qw;
   tmp_control.orientation.x = qx;
   tmp_control.orientation.y = qy;
   tmp_control.orientation.z = qz;
+
   if(interaction_mode == visualization_msgs::InteractiveMarkerControl::MOVE_ROTATE_3D)
   {
     tmp_control.name = "rotate_x";
@@ -336,10 +356,11 @@ void CartesianImpl::processFeedback(const visualization_msgs::InteractiveMarkerF
                     << ", " << feedback->pose.position.z << " frame " << feedback->header.frame_id );
 
   Eigen::Affine3d pose_reference = Eigen::Affine3d::Identity();
-  Eigen::Vector6d twist_reference = Eigen::Vector6d::Zero();
-  pose_reference = wolf_controller_utils::poseToAffine3d(feedback->pose); //tf::poseMsgToEigen(feedback->pose,pose_reference);
+  Eigen::Matrix<double,6,1> twist_reference = Eigen::Matrix<double,6,1>::Zero();
 
-  if(is_continuous_ == true)
+  pose_reference = wolf_controller_utils::poseToAffine3d(feedback->pose);
+
+  if(is_continuous_)
   {
     buffer_reference_pose_.writeFromNonRT(pose_reference);
     buffer_reference_twist_.writeFromNonRT(twist_reference);
@@ -349,14 +370,14 @@ void CartesianImpl::processFeedback(const visualization_msgs::InteractiveMarkerF
 void CartesianImpl::referenceCallback(const wolf_msgs::Cartesian::ConstPtr& msg)
 {
   double period = period_;
-
   if(last_time_ != 0.0)
     period = msg->header.stamp.toSec() - last_time_;
 
   Eigen::Affine3d pose_reference = Eigen::Affine3d::Identity();
-  Eigen::Vector6d twist_reference = Eigen::Vector6d::Zero();
-  pose_reference = wolf_controller_utils::poseToAffine3d(msg->pose); // tf::poseMsgToEigen(msg->pose,pose_reference);
-  twist_reference = wolf_controller_utils::twistToVector6d(msg->twist); // tf::twistMsgToEigen(msg->twist,twist_reference);
+  Eigen::Matrix<double,6,1> twist_reference = Eigen::Matrix<double,6,1>::Zero();
+
+  pose_reference  = wolf_controller_utils::poseToAffine3d(msg->pose);
+  twist_reference = wolf_controller_utils::twistToVector6d(msg->twist);
 
   // Check if reference frame changed
   if(msg->header.frame_id != "" && msg->header.frame_id != getBaseLink() && OPTIONS.set_ext_reference)
@@ -366,6 +387,7 @@ void CartesianImpl::referenceCallback(const wolf_msgs::Cartesian::ConstPtr& msg)
   buffer_reference_twist_.writeFromNonRT(twist_reference);
 
   last_time_ = msg->header.stamp.toSec();
+  (void)period;
 }
 
 visualization_msgs::InteractiveMarkerControl& CartesianImpl::makeSTLControl(visualization_msgs::InteractiveMarker& msg)
@@ -379,7 +401,6 @@ visualization_msgs::InteractiveMarkerControl& CartesianImpl::makeSTLControl(visu
     tmp_control.markers.push_back(makeSphere(msg));
 
   msg.controls.push_back(tmp_control);
-
   return msg.controls.back();
 }
 
@@ -396,7 +417,7 @@ visualization_msgs::Marker CartesianImpl::makeSphere(visualization_msgs::Interac
   return marker_;
 }
 
-Eigen::Affine3d CartesianImpl::getPose(const std::string& base_link, const std::string& distal_link)
+Eigen::Affine3d CartesianImpl::getPoseTF(const std::string& base_link, const std::string& distal_link)
 {
   static tf2_ros::Buffer buffer;
   static tf2_ros::TransformListener listener(buffer);
@@ -406,9 +427,8 @@ Eigen::Affine3d CartesianImpl::getPose(const std::string& base_link, const std::
   {
     try
     {
-      // Use the tf2 buffer to lookup the transform
       transformStamped = buffer.lookupTransform(base_link, distal_link, ros::Time(0), ros::Duration(1.0));
-      break; // Exit loop if transform is successfully obtained
+      break;
     }
     catch (tf2::TransformException &ex)
     {
@@ -417,10 +437,7 @@ Eigen::Affine3d CartesianImpl::getPose(const std::string& base_link, const std::
     }
   }
 
-  Eigen::Affine3d pose;
-  // Convert the TransformStamped to Eigen::Affine3d
-  pose = tf2::transformToEigen(transformStamped.transform);
-  return pose;
+  return tf2::transformToEigen(transformStamped.transform);
 }
 
 visualization_msgs::Marker CartesianImpl::makeSTL( visualization_msgs::InteractiveMarker &msg )
@@ -429,7 +446,7 @@ visualization_msgs::Marker CartesianImpl::makeSTL( visualization_msgs::Interacti
   auto link = urdf_.getLink(distal_link);
   auto controlled_link = link;
 
-  while(!link->visual)
+  while(link && !link->visual)
   {
     if(!link->parent_joint)
     {
@@ -439,8 +456,10 @@ visualization_msgs::Marker CartesianImpl::makeSTL( visualization_msgs::Interacti
     link = urdf_.getLink(link->parent_joint->parent_link_name);
   }
 
-  Eigen::Affine3d&& actual_pose = getPose(controlled_link->name, link->name);
-  affine3dToVisualizationPose(actual_pose,marker_);
+  if(!link) return makeSphere(msg);
+
+  Eigen::Affine3d actual_pose = getPoseTF(controlled_link->name, link->name);
+  affine3dToVisualizationPose(actual_pose, marker_);
 
   marker_.color.r = 0.5;
   marker_.color.g = 0.5;
@@ -449,9 +468,7 @@ visualization_msgs::Marker CartesianImpl::makeSTL( visualization_msgs::Interacti
   if(link->visual->geometry->type == urdf::Geometry::MESH)
   {
     marker_.type = visualization_msgs::Marker::MESH_RESOURCE;
-
     auto mesh = std::static_pointer_cast<urdf::Mesh>(link->visual->geometry);
-
     marker_.mesh_resource = mesh->filename;
     marker_.scale.x = mesh->scale.x;
     marker_.scale.y = mesh->scale.y;
@@ -460,30 +477,23 @@ visualization_msgs::Marker CartesianImpl::makeSTL( visualization_msgs::Interacti
   else if(link->visual->geometry->type == urdf::Geometry::BOX)
   {
     marker_.type = visualization_msgs::Marker::CUBE;
-
-    auto mesh = std::static_pointer_cast<urdf::Box>(link->visual->geometry);
-
-    marker_.scale.x = mesh->dim.x;
-    marker_.scale.y = mesh->dim.y;
-    marker_.scale.z = mesh->dim.z;
-
+    auto box = std::static_pointer_cast<urdf::Box>(link->visual->geometry);
+    marker_.scale.x = box->dim.x;
+    marker_.scale.y = box->dim.y;
+    marker_.scale.z = box->dim.z;
   }
   else if(link->visual->geometry->type == urdf::Geometry::CYLINDER)
   {
     marker_.type = visualization_msgs::Marker::CYLINDER;
-
-    auto mesh = std::static_pointer_cast<urdf::Cylinder>(link->visual->geometry);
-
-    marker_.scale.x = marker_.scale.y = mesh->radius;
-    marker_.scale.z = mesh->length;
+    auto cyl = std::static_pointer_cast<urdf::Cylinder>(link->visual->geometry);
+    marker_.scale.x = marker_.scale.y = cyl->radius;
+    marker_.scale.z = cyl->length;
   }
   else if(link->visual->geometry->type == urdf::Geometry::SPHERE)
   {
     marker_.type = visualization_msgs::Marker::SPHERE;
-
-    auto mesh = std::static_pointer_cast<urdf::Sphere>(link->visual->geometry);
-
-    marker_.scale.x = marker_.scale.y = marker_.scale.z = 2.*mesh->radius;
+    auto sph = std::static_pointer_cast<urdf::Sphere>(link->visual->geometry);
+    marker_.scale.x = marker_.scale.y = marker_.scale.z = 2.*sph->radius;
   }
 
   marker_.color.a = .9;
@@ -492,8 +502,9 @@ visualization_msgs::Marker CartesianImpl::makeSTL( visualization_msgs::Interacti
 
 void CartesianImpl::makeMenu()
 {
-
-  continuous_control_entry_ = menu_handler_.insert("Marker Ctrl",boost::bind(&CartesianImpl::setContinuousCtrl,this,_1));
+  continuous_control_entry_ =
+      menu_handler_.insert("Marker Ctrl",
+                           boost::bind(&CartesianImpl::setContinuousCtrl, this, _1));
   menu_handler_.setCheckState(continuous_control_entry_, interactive_markers::MenuHandler::CHECKED);
 
   way_point_entry_ = menu_handler_.insert("Add WayPoint");
@@ -503,36 +514,38 @@ void CartesianImpl::makeMenu()
   for (unsigned int i = 0; i < 10; i++ )
   {
     std::ostringstream sec_opt;
-    double sec = (i+1) * 0.5; // Make increments of 0.5s
+    double sec = (i+1) * 0.5;
     sec_opt << sec;
-    T_last_ = menu_handler_.insert(T_entry_, sec_opt.str(),boost::bind(&CartesianImpl::wayPointCallBack,this,_1,sec));
+    T_last_ = menu_handler_.insert(T_entry_, sec_opt.str(),
+                                   boost::bind(&CartesianImpl::wayPointCallBack, this, _1, sec));
     menu_handler_.setCheckState(T_last_,interactive_markers::MenuHandler::UNCHECKED);
   }
-  reset_all_way_points_entry_ = menu_handler_.insert(way_point_entry_, "Reset All",boost::bind(&CartesianImpl::resetAllWayPoints,this,_1));
-  reset_lastway_point_entry_ = menu_handler_.insert(way_point_entry_, "Reset Last",boost::bind(&CartesianImpl::resetLastWayPoints,this,_1));
-  send_way_points_entry_ = menu_handler_.insert(way_point_entry_, "Send",boost::bind(&CartesianImpl::sendWayPoints,this,_1));
+
+  reset_all_way_points_entry_ = menu_handler_.insert(way_point_entry_, "Reset All",
+                                                     boost::bind(&CartesianImpl::resetAllWayPoints,this,_1));
+  reset_lastway_point_entry_ = menu_handler_.insert(way_point_entry_, "Reset Last",
+                                                    boost::bind(&CartesianImpl::resetLastWayPoints,this,_1));
+  send_way_points_entry_ = menu_handler_.insert(way_point_entry_, "Send",
+                                                boost::bind(&CartesianImpl::sendWayPoints,this,_1));
 
   base_link_entry_ = menu_handler_.insert("Base Link");
   menu_handler_.setVisible(base_link_entry_, true);
 
   std::string distal_link = getDistalLink();
   std::string base_link = getBaseLink();
+
   for(unsigned int i = 0; i < links_.size(); ++i)
   {
     if(distal_link != links_.at(i)->name)
     {
       interactive_markers::MenuHandler::EntryHandle link_entry =
-          menu_handler_.insert(base_link_entry_,links_.at(i)->name,boost::bind(&CartesianImpl::changeBaseLink,this,_1,links_.at(i)->name));
-
+          menu_handler_.insert(base_link_entry_, links_.at(i)->name,
+                               boost::bind(&CartesianImpl::changeBaseLink, this, _1, links_.at(i)->name));
 
       if(base_link.compare("world") == 0 && (links_.at(i)->name).compare("world") == 0)
-      {
         menu_handler_.setCheckState(link_entry, interactive_markers::MenuHandler::CHECKED );
-      }
       else if(base_link.compare(links_.at(i)->name) == 0)
-      {
         menu_handler_.setCheckState(link_entry, interactive_markers::MenuHandler::CHECKED );
-      }
       else
         menu_handler_.setCheckState(link_entry, interactive_markers::MenuHandler::UNCHECKED );
 
@@ -547,10 +560,10 @@ void CartesianImpl::makeMenu()
   menu_handler_.apply(interactive_marker_server_, interactive_marker_.name);
 }
 
-void CartesianImpl::changeBaseLink(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, std::string new_base_link)
+void CartesianImpl::changeBaseLink(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback,
+                                   std::string new_base_link)
 {
   int entry_id = feedback->menu_entry_id;
-
   menu_handler_.getTitle(entry_id, new_base_link);
 
   if(new_base_link.compare(getBaseLink()) == 0)
@@ -558,8 +571,8 @@ void CartesianImpl::changeBaseLink(const visualization_msgs::InteractiveMarkerFe
 
   if(setBaseLink(new_base_link))
   {
-    update(Eigen::VectorXd(1));
     reset();
+
     for (auto& tmp_map : map_link_entries_)
     {
       if(tmp_map.first == new_base_link)
@@ -567,6 +580,7 @@ void CartesianImpl::changeBaseLink(const visualization_msgs::InteractiveMarkerFe
       else
         menu_handler_.setCheckState(tmp_map.second, interactive_markers::MenuHandler::UNCHECKED );
     }
+
     menu_handler_.reApply(interactive_marker_server_);
     interactive_marker_server_.applyChanges();
   }
@@ -576,17 +590,14 @@ void CartesianImpl::sendWayPoints(const visualization_msgs::InteractiveMarkerFee
 {
   if(waypoints_.empty()) return;
 
-  std::partial_sum(T_.begin(),T_.end(),T_.begin());
+  std::partial_sum(T_.begin(), T_.end(), T_.begin());
 
   CartesianTrajectory::WayPointVector wpv;
-
-  for(int i = 0; i < waypoints_.size(); i++)
+  for(int i = 0; i < (int)waypoints_.size(); i++)
   {
     CartesianTrajectory::WayPoint wp;
-
-    wp.T_ref = wolf_controller_utils::poseToAffine3d(waypoints_[i]); // tf::poseMsgToEigen(waypoints_[i], wp.T_ref);
+    wp.T_ref = wolf_controller_utils::poseToAffine3d(waypoints_[i]);
     wp.duration = T_.at(i);
-
     wpv.push_back(wp);
   }
 
@@ -620,12 +631,14 @@ void CartesianImpl::resetLastWayPoints(const visualization_msgs::InteractiveMark
   {
     if(interactive_marker_server_.empty())
     {
-      poseToVisualizationPose(waypoints_.back(),interactive_marker_);
-      interactive_marker_server_.insert(interactive_marker_,boost::bind(&CartesianImpl::processFeedback,this,_1));
+      poseToVisualizationPose(waypoints_.back(), interactive_marker_);
+      interactive_marker_server_.insert(interactive_marker_,
+                                        boost::bind(&CartesianImpl::processFeedback, this, _1));
       menu_handler_.reApply(interactive_marker_server_);
       interactive_marker_server_.applyChanges();
     }
   }
+
   publishWP(waypoints_);
 }
 
@@ -648,6 +661,7 @@ void CartesianImpl::wayPointCallBack(const visualization_msgs::InteractiveMarker
   qy = feedback->pose.orientation.y;
   qz = feedback->pose.orientation.z;
   qw = feedback->pose.orientation.w;
+
   if(is_continuous_ == false)
   {
     ROS_INFO("\n %s set waypoint wrt %s @: \n pos = [%f, %f, %f],\n orient = [%f, %f, %f, %f],\n of %.1f secs",
@@ -690,8 +704,9 @@ bool CartesianImpl::spawnMarker()
   {
     Eigen::Affine3d start_pose;
     getActualPose(start_pose);
-    affine3dToVisualizationPose(start_pose,interactive_marker_);
-    interactive_marker_server_.insert(interactive_marker_,boost::bind(&CartesianImpl::processFeedback, this, _1));
+    affine3dToVisualizationPose(start_pose, interactive_marker_);
+    interactive_marker_server_.insert(interactive_marker_,
+                                      boost::bind(&CartesianImpl::processFeedback, this, _1));
     menu_handler_.reApply(interactive_marker_server_);
     interactive_marker_server_.applyChanges();
   }
@@ -710,15 +725,17 @@ void CartesianImpl::setContinuousCtrl(const visualization_msgs::InteractiveMarke
     T_.clear();
     trj_->reset();
   }
-  else if(is_continuous_ == true)
+  else
   {
     menu_handler_.setCheckState(continuous_control_entry_, interactive_markers::MenuHandler::CHECKED);
     menu_handler_.setVisible(way_point_entry_, false);
     waypoints_.clear();
     T_.clear();
+
     Eigen::Affine3d pose;
-    Eigen::Vector6d twist = Eigen::Vector6d::Zero();
+    Eigen::Matrix<double,6,1> twist = Eigen::Matrix<double,6,1>::Zero();
     getActualPose(pose);
+
     buffer_reference_pose_.writeFromNonRT(pose);
     buffer_reference_twist_.writeFromNonRT(twist);
   }

@@ -1,10 +1,5 @@
 /**
 WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
-
-WoLF is licensed under a license Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
-
-You should have received a copy of the license along with this
-work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 **/
 
 #ifndef TASK_ROS_WRAPPERS_CARTESIAN_H
@@ -15,10 +10,13 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 #include <urdf/model.h>
 #include <std_srvs/Empty.h>
 #include <geometry_msgs/PoseArray.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_eigen/tf2_eigen.h>
 
 // WoLF
 #include <wolf_wbid/task_ros_wrappers/handler.h>
 #include <wolf_wbid/cartesian_trajectory.h>
+#include <wolf_wbid/wbid/tasks/cartesian_task.h>
 
 // WoLF utils
 #include <wolf_controller_utils/geometry.h>
@@ -30,39 +28,38 @@ work. If not, see <http://creativecommons.org/licenses/by-nc-nd/4.0/>.
 
 // STD
 #include <numeric>
+#include <map>
+#include <sstream>
 
 namespace wolf_wbid {
+
+class QuadrupedRobot;
+class IDVariables;
 
 // CARTESIAN
 class CartesianImpl : public Cartesian, public TaskRosHandler<wolf_msgs::CartesianTask>
 {
-
 public:
-
-  typedef std::shared_ptr<CartesianImpl> Ptr;
+  using Ptr = std::shared_ptr<CartesianImpl>;
 
   CartesianImpl(const std::string& robot_name,
-            const std::string& task_id,
-            const XBot::ModelInterface& robot,
-            const std::string& distal_link,
-            const std::string& base_link,
-            const OpenSoT::AffineHelper& qddot,
-            const double& period = 0.001,
-            const bool& use_mesh = true);
+                const std::string& task_id,
+                QuadrupedRobot& robot,
+                const std::string& distal_link,
+                const std::string& base_link,
+                const IDVariables& vars,
+                const double& period = 0.001,
+                const bool& use_mesh = true);
 
-  virtual void registerReconfigurableVariables() override;
-
-  virtual void loadParams() override;
-
-  virtual void updateCost(const Eigen::VectorXd& x) override;
-
-  virtual void publish() override;
-
-  virtual bool reset() override;
+  void registerReconfigurableVariables() override;
+  void loadParams() override;
+  void updateCost(const Eigen::VectorXd& x) override;
+  void publish() override;
+  bool reset() override;
 
 protected:
-
-  void makeMarker(const std::string &distal_link, const std::string &base_link, unsigned int interaction_mode, bool show);
+  void makeMarker(const std::string &distal_link, const std::string &base_link,
+                  unsigned int interaction_mode, bool show);
 
   void createInteractiveMarkerControl(const double qw, const double qx, const double qy, const double qz,
                                       const unsigned int interaction_mode);
@@ -77,11 +74,12 @@ protected:
 
   visualization_msgs::Marker makeSTL( visualization_msgs::InteractiveMarker &msg );
 
-  Eigen::Affine3d getPose(const std::string& base_link, const std::string& distal_link);
+  Eigen::Affine3d getPoseTF(const std::string& base_link, const std::string& distal_link);
 
   void makeMenu();
 
-  void changeBaseLink(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, std::string new_base_link);
+  void changeBaseLink(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback,
+                      std::string new_base_link);
 
   void sendWayPoints(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
 
@@ -102,37 +100,28 @@ protected:
   void setContinuousCtrl(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
 
 private:
+  void _updateInternal(const Eigen::VectorXd& x);
 
-  virtual void _update(const Eigen::VectorXd& x) override;
+  QuadrupedRobot& robot_;
 
-  /**
-   * @brief waypoints_pub_ ROS publisher with the waypoint poses
-   */
+  // ROS publisher with the waypoint poses
   ros::Publisher waypoints_pub_;
 
-  /**
-   * @brief is_continuous_ true if the poses are directly given to the task
-   */
-  bool is_continuous_;
+  // true if the poses are directly given to the task
+  bool is_continuous_{true};
 
-  /**
-   * @brief waypoints_ contains all the waypoints BUT not the initial position!
-   */
+  // contains all the waypoints BUT not the initial position!
   std::vector<geometry_msgs::Pose> waypoints_;
 
-  /**
-   * @brief T_ contains the times of each waypoint-trajectory
-   */
+  // contains the times of each waypoint-trajectory
   std::vector<float> T_;
 
-  int control_type_;
+  int control_type_{visualization_msgs::InteractiveMarkerControl::MOVE_ROTATE_3D};
 
   std_srvs::EmptyRequest req_;
   std_srvs::EmptyResponse res_;
 
-  /**
-   * @brief Marker variables
-   */
+  // Marker variables
   visualization_msgs::InteractiveMarker interactive_marker_;
   interactive_markers::InteractiveMarkerServer interactive_marker_server_;
   visualization_msgs::Marker marker_;
@@ -149,35 +138,19 @@ private:
   visualization_msgs::InteractiveMarkerControl  menu_control_;
   std::map<std::string,interactive_markers::MenuHandler::EntryHandle> map_link_entries_;
 
-  /**
-   * @brief urdf_ model description of the robot
-   */
+  // urdf model description of the robot
   urdf::ModelInterface urdf_;
-
-  /**
-   * @brief links_ urdf available links
-   */
   std::vector<urdf::LinkSharedPtr> links_;
+  bool use_mesh_{true};
 
-  /**
-   * @brief use_mesh_ true if the end-effector mesh is used for the marker visualization
-   */
-  bool use_mesh_;
-
-  /**
-   * @brief Cartesian trajectory interpolator
-   */
+  // Cartesian trajectory interpolator
   CartesianTrajectory::Ptr trj_;
 
-  /**
-   * @brief Realtime buffers
-   */
+  // Realtime buffers
   realtime_tools::RealtimeBuffer<Eigen::Affine3d> buffer_reference_pose_;
-  realtime_tools::RealtimeBuffer<Eigen::Vector6d> buffer_reference_twist_;
-
+  realtime_tools::RealtimeBuffer<Eigen::Matrix<double,6,1>> buffer_reference_twist_;
 };
 
-} // namespace
+} // namespace wolf_wbid
 
 #endif // TASK_ROS_WRAPPERS_CARTESIAN_H
-
