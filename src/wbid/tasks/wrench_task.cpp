@@ -5,10 +5,10 @@
 
 namespace wolf_wbid {
 
-WrenchTask::WrenchTask(std::string task_name,
+WrenchTask::WrenchTask(std::string task_id,
                        std::string contact_name,
                        double weight)
-: task_name_(std::move(task_name))
+: task_id_(std::move(task_id))
 , contact_name_(std::move(contact_name))
 , weight_(weight)
 {
@@ -64,6 +64,13 @@ void WrenchTask::compute(const IDVariables& vars, LsqTerm& out)
 
   // diagonal weights (same scalar replicated on 3 axes)
   out.w_diag.setConstant(cd, weight_.load());
+}
+
+void wolf_wbid::WrenchTask::update(const Eigen::VectorXd& /*x*/)
+{
+  // No-op:
+  // For WrenchTask the LSQ term (A,b,W) does not depend on x.
+  // Reference/weight are handled via setters (called by wrappers).
 }
 
 } // namespace wolf_wbid

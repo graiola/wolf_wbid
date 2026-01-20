@@ -24,11 +24,11 @@ class WrenchTask : public ITaskLSQ
 public:
   using Ptr = std::shared_ptr<WrenchTask>;
 
-  WrenchTask(std::string task_name,
+  WrenchTask(std::string task_id_,
              std::string contact_name,
              double weight = 1.0);
 
-  std::string name() const override { return task_name_; }
+  const std::string& getTaskID() const { return task_id_; }
   const std::string& contactName() const { return contact_name_; }
 
   // Weight (diagonal, same scalar for x/y/z)
@@ -45,8 +45,10 @@ public:
   // Reset policy: by default reset ref to zero
   virtual bool reset();
 
+  void update(const Eigen::VectorXd& x);
+
 private:
-  std::string task_name_;
+  std::string task_id_;
   std::string contact_name_;
 
   std::atomic<double> weight_{1.0};

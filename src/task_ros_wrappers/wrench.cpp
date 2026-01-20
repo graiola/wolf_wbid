@@ -20,18 +20,19 @@ WrenchImpl::WrenchImpl(const std::string& robot_name,
   , TaskRosHandler<wolf_msgs::WrenchTask>(task_id, robot_name, period)
   , vars_(vars)
 {
-  Eigen::Vector3d z = Eigen::Vector3d::Zero();
-  buffer_reference_force_.initRT(z);
+  buffer_reference_force_.initRT(Eigen::Vector3d::Zero());
 
   // reference subscriber
   reference_sub_ = nh_.subscribe("reference/" + task_id, 1000,
                                  &WrenchImpl::referenceCallback, this);
+
+  // init buffer from task
+  buffer_weight_diag_ = this->weight();
 }
 
 void WrenchImpl::registerReconfigurableVariables()
 {
-  // Only weight for this task (no lambda in OpenSoT-free wrench task)
-  double w = this->weight();
+  const double w = this->weight();
 
   ddr_server_->registerVariable<double>(
         "set_weight_diag", w,
@@ -45,51 +46,54 @@ void WrenchImpl::loadParams()
 {
   double weight;
 
-  // IMPORTANT: avoid ambiguity by explicitly using TaskWrapperInterface::task_name_
-  const std::string& tn = TaskWrapperInterface::task_name_;
-
-  if(!nh_.getParam("gains/" + tn + "/weight", weight))
+  if(!nh_.getParam("gains/" + task_name_ + "/weight", weight))
     weight = this->weight();
 
   if(weight < 0.0)
-    throw std::runtime_error("WrenchImpl::loadParams(): weight must be positive!");
+    throw std::runtime_error("WrenchImpl::loadParams(): weight must be >= 0");
 
   buffer_weight_diag_ = weight;
 
-  // apply
+  // apply immediately
   this->setWeight(weight);
 }
 
-void WrenchImpl::update(const Eigen::VectorXd& /*x*/)
+void WrenchImpl::applyExternalKnobs()
 {
-  // dynamic reconfigure -> task params
   if(OPTIONS.set_ext_weight)
-  {
     this->setWeight(buffer_weight_diag_.load());
-  }
 
-  // external reference (topic)
+  // no lambda / gains here (unless you add them in WrenchTask later)
+}
+
+void WrenchImpl::applyExternalReference()
+{
   if(OPTIONS.set_ext_reference)
-  {
     this->setReference(*buffer_reference_force_.readFromRT());
-  }
-
-  // NOTE: No math here: the QP term is built later by calling WrenchTask::compute(vars, term)
 }
 
 void WrenchImpl::updateCost(const Eigen::VectorXd& x)
 {
-  // cost = 0.5 * w * ||f - fref||^2
-  if(vars_.contactDim() != 3)
-    throw std::runtime_error("WrenchImpl::updateCost(): only POINT_CONTACT supported");
+  // Option A (preferred): if WrenchTask can compute actual force from x internally, use that.
+  // Otherwise, we can extract from x using IDVariables mapping (Option B).
 
-  const int off = vars_.contactOffset(this->contactName());
+  // ---------------------------
+  // Option B: extract from x (requires stable IDVariables API)
+  // ---------------------------
+  // EXPECTED API (you likely already have something like this):
+  //   int contactOffset(const std::string& name) const;
+  // If you have a different name, I’ll align it.
+
+  const int off = vars_.contactOffset(contactName());
   if(off < 0 || off + 3 > x.size())
-    throw std::runtime_error("WrenchImpl::updateCost(): contact block out of range");
+    throw std::runtime_error("WrenchImpl::updateCost(): contact block out of range for " + contactName());
 
   const Eigen::Vector3d f_act = x.segment<3>(off);
   const Eigen::Vector3d f_ref = this->reference();
   const Eigen::Vector3d e = f_act - f_ref;
+
+  last_f_act_ = f_act;
+  has_last_f_act_ = true;
 
   cost_ = 0.5 * this->weight() * e.squaredNorm();
 }
@@ -100,12 +104,9 @@ void WrenchImpl::publish()
 
   if(rt_pub_->trylock())
   {
-    rt_pub_->msg_.header.frame_id = WORLD_FRAME_NAME; // or keep as task base if you want
+    rt_pub_->msg_.header.frame_id = WORLD_FRAME_NAME;
     rt_pub_->msg_.header.stamp = ros::Time::now();
 
-    // actual from last solution is not stored in task: compute from last x_ if you have it,
-    // here we publish what we can: reference + cost. If you want actual, pass x_ into publish().
-    // For now publish reference as the desired wrench (force only), actual zeros.
     const Eigen::Vector3d f_ref = this->reference();
 
     // reference
@@ -116,10 +117,20 @@ void WrenchImpl::publish()
     rt_pub_->msg_.wrench_reference.torque.y = 0.0;
     rt_pub_->msg_.wrench_reference.torque.z = 0.0;
 
-    // actual (not available here without x) => set to 0
-    rt_pub_->msg_.wrench_actual.force.x  = 0.0;
-    rt_pub_->msg_.wrench_actual.force.y  = 0.0;
-    rt_pub_->msg_.wrench_actual.force.z  = 0.0;
+    // actual (if we cached it from updateCost)
+    if(has_last_f_act_)
+    {
+      rt_pub_->msg_.wrench_actual.force.x  = last_f_act_.x();
+      rt_pub_->msg_.wrench_actual.force.y  = last_f_act_.y();
+      rt_pub_->msg_.wrench_actual.force.z  = last_f_act_.z();
+    }
+    else
+    {
+      rt_pub_->msg_.wrench_actual.force.x  = 0.0;
+      rt_pub_->msg_.wrench_actual.force.y  = 0.0;
+      rt_pub_->msg_.wrench_actual.force.z  = 0.0;
+    }
+
     rt_pub_->msg_.wrench_actual.torque.x = 0.0;
     rt_pub_->msg_.wrench_actual.torque.y = 0.0;
     rt_pub_->msg_.wrench_actual.torque.z = 0.0;
@@ -132,13 +143,13 @@ void WrenchImpl::publish()
 
 bool WrenchImpl::reset()
 {
-  // reset reference to zero (task-level)
   this->WrenchTask::reset();
 
-  // sync RT buffer
-  Eigen::Vector3d z = Eigen::Vector3d::Zero();
-  buffer_reference_force_.initRT(z);
+  buffer_reference_force_.initRT(Eigen::Vector3d::Zero());
+  has_last_f_act_ = false;
+  last_f_act_.setZero();
 
+  buffer_weight_diag_ = this->weight();
   return true;
 }
 

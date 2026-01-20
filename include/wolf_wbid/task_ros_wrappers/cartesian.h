@@ -14,9 +14,9 @@ WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 #include <tf2_eigen/tf2_eigen.h>
 
 // WoLF
+#include <wolf_wbid/task_interface.h>                 // <- brings wolf_wbid::Cartesian handle
 #include <wolf_wbid/task_ros_wrappers/handler.h>
 #include <wolf_wbid/cartesian_trajectory.h>
-#include <wolf_wbid/wbid/tasks/cartesian_task.h>
 
 // WoLF utils
 #include <wolf_controller_utils/geometry.h>
@@ -36,7 +36,7 @@ namespace wolf_wbid {
 class QuadrupedRobot;
 class IDVariables;
 
-// CARTESIAN
+// CARTESIAN (ROS wrapper)
 class CartesianImpl : public Cartesian, public TaskRosHandler<wolf_msgs::CartesianTask>
 {
 public:
@@ -58,6 +58,11 @@ public:
   bool reset() override;
 
 protected:
+
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;
+
+  // marker helpers
   void makeMarker(const std::string &distal_link, const std::string &base_link,
                   unsigned int interaction_mode, bool show);
 
@@ -100,8 +105,6 @@ protected:
   void setContinuousCtrl(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
 
 private:
-  void _updateInternal(const Eigen::VectorXd& x);
-
   QuadrupedRobot& robot_;
 
   // ROS publisher with the waypoint poses

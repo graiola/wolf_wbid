@@ -10,12 +10,8 @@ WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 #include <wolf_msgs/Wrench.h>
 
 // WoLF
-#include <wolf_wbid/task_ros_wrappers/handler.h>
 #include <wolf_wbid/task_interface.h>
-
-// New OpenSoT-free task
-#include <wolf_wbid/wbid/tasks/wrench_task.h>
-#include <wolf_wbid/wbid/id_variables.h>
+#include <wolf_wbid/task_ros_wrappers/handler.h>
 
 // ROS RT buffer
 #include <realtime_tools/realtime_buffer.h>
@@ -27,9 +23,11 @@ WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 
 namespace wolf_wbid {
 
+class IDVariables;
+
 /**
  * ROS wrapper for OpenSoT-free POINT_CONTACT wrench task
- * Minimizes || f_contact - f_ref || with diagonal scalar weight.
+ * Minimizes || f_contact - f_ref || with scalar weight.
  */
 class WrenchImpl : public Wrench, public TaskRosHandler<wolf_msgs::WrenchTask>
 {
@@ -45,11 +43,14 @@ public:
   void registerReconfigurableVariables() override;
   void loadParams() override;
   void updateCost(const Eigen::VectorXd& x) override;
+
   void publish() override;
   bool reset() override;
 
-  // called by IDProblem/update loop (like others)
-  void update(const Eigen::VectorXd& x);
+protected:
+  // called by TaskWrapperInterface::update(x)
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;
 
 private:
   void referenceCallback(const wolf_msgs::Wrench::ConstPtr& msg);
@@ -57,6 +58,11 @@ private:
   const IDVariables& vars_;
 
   realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_force_;
+
+  // Optional: cache last x if you want to publish actual wrench from solution
+  // (set from updateCost or from solver externally)
+  Eigen::Vector3d last_f_act_{Eigen::Vector3d::Zero()};
+  bool has_last_f_act_{false};
 };
 
 } // namespace wolf_wbid

@@ -39,9 +39,9 @@ public:
   virtual bool reset();
 
   /** Task interface: minimize || W^(1/2) (A x - b) ||^2 */
-  const Eigen::MatrixXd& getA() const { return A_; }
-  const Eigen::VectorXd& getb() const { return b_; }
-  const Eigen::MatrixXd& getWeight() const { return W_; }
+  const Eigen::MatrixXd& A() const { return A_; }
+  const Eigen::VectorXd& b() const { return b_; }
+  const Eigen::MatrixXd& W() const { return W_; }
 
   /** Scalar weight (diag) helper */
   void setWeightDiag(double w);

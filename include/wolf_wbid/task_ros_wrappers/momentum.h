@@ -1,34 +1,25 @@
-// ============================================================================
-// File: include/wolf_wbid/task_ros_wrappers/momentum.h
-// Updated ROS wrapper (OpenSoT-free)
-// ============================================================================
-
 /**
 WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
-WoLF is licensed under a license Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
 */
 
 #ifndef TASK_ROS_WRAPPERS_MOMENTUM_H
 #define TASK_ROS_WRAPPERS_MOMENTUM_H
 
-// ROS msg (you used CartesianTask msg for this wrapper)
+// ROS msg (legacy: reusing CartesianTask msg)
 #include <wolf_msgs/CartesianTask.h>
 
 // WoLF
-#include <wolf_wbid/task_ros_wrappers/handler.h>
 #include <wolf_wbid/task_interface.h>
+#include <wolf_wbid/task_ros_wrappers/handler.h>
 
-// OpenSoT-free task
-#include <wolf_wbid/wbid/tasks/angular_momentum_task.h>
-
-// Robot & vars
-#include <wolf_wbid/quadruped_robot.h>
-#include <wolf_wbid/wbid/id_variables.h>
-
-// Utils
-#include <wolf_controller_utils/converters.h>
+// STD
+#include <memory>
+#include <string>
 
 namespace wolf_wbid {
+
+class QuadrupedRobot;
+class IDVariables;
 
 class AngularMomentumImpl : public AngularMomentum, public TaskRosHandler<wolf_msgs::CartesianTask>
 {
@@ -45,9 +36,14 @@ public:
   void loadParams() override;
   void updateCost(const Eigen::VectorXd& x) override;
 
-  void update(const Eigen::VectorXd& x);   // apply buffers + task update
   void publish() override;
   bool reset() override;
+
+protected:
+  // called by TaskWrapperInterface::update(x)
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;  // typically unused for momentum
+
 };
 
 } // namespace wolf_wbid

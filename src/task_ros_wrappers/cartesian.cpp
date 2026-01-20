@@ -12,6 +12,9 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <tf2/transform_datatypes.h>
 
+// (optional) if you used WORLD_FRAME_NAME in old code
+#include <wolf_wbid/task_interface.h>
+
 using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
@@ -30,7 +33,6 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
 , use_mesh_(use_mesh)
 {
   // Get the urdf (used for the mesh)
-  // If QuadrupedRobot does not expose getUrdf(), replace with a param-based URDF load here.
   urdf_ = robot_.getUrdf();
 
   // Get the urdf links (used for the base frame selection)
@@ -115,6 +117,7 @@ void CartesianImpl::loadParams()
   buffer_lambda2_ = lambda2;
   buffer_weight_diag_ = weight;
 
+  // push immediately (startup)
   setLambda(lambda1, lambda2);
 
   Eigen::Matrix<double,6,6> W = Eigen::Matrix<double,6,6>::Identity();
@@ -174,10 +177,55 @@ void CartesianImpl::loadParams()
   }
 }
 
+void CartesianImpl::applyExternalKnobs()
+{
+  if(OPTIONS.set_ext_lambda)
+    setLambda(buffer_lambda1_.load(), buffer_lambda2_.load());
+
+  if(OPTIONS.set_ext_weight)
+  {
+    Eigen::Matrix<double,6,6> W = Eigen::Matrix<double,6,6>::Identity();
+    W.diagonal().setConstant(buffer_weight_diag_.load());
+    setWeight(W);
+  }
+
+  if(OPTIONS.set_ext_gains)
+  {
+    Eigen::Matrix<double,6,6> Kp = Eigen::Matrix<double,6,6>::Zero();
+    Eigen::Matrix<double,6,6> Kd = Eigen::Matrix<double,6,6>::Zero();
+
+    Kp(0,0)=buffer_kp_x_.load();     Kp(1,1)=buffer_kp_y_.load();     Kp(2,2)=buffer_kp_z_.load();
+    Kp(3,3)=buffer_kp_roll_.load();  Kp(4,4)=buffer_kp_pitch_.load(); Kp(5,5)=buffer_kp_yaw_.load();
+
+    Kd(0,0)=buffer_kd_x_.load();     Kd(1,1)=buffer_kd_y_.load();     Kd(2,2)=buffer_kd_z_.load();
+    Kd(3,3)=buffer_kd_roll_.load();  Kd(4,4)=buffer_kd_pitch_.load(); Kd(5,5)=buffer_kd_yaw_.load();
+
+    setKp(Kp);
+    setKd(Kd);
+  }
+}
+
+void CartesianImpl::applyExternalReference()
+{
+  if(!OPTIONS.set_ext_reference)
+    return;
+
+  if(is_continuous_)
+  {
+    setReference(*buffer_reference_pose_.readFromRT(),
+                 *buffer_reference_twist_.readFromRT());
+  }
+  else
+  {
+    trj_->update(period_);
+    trj_->getReference(tmp_affine3d_, &tmp_vector6d_);
+    setReference(tmp_affine3d_, tmp_vector6d_);
+  }
+}
+
 void CartesianImpl::updateCost(const Eigen::VectorXd& /*x*/)
 {
-  // Se vuoi replicare il costo OpenSoT (computeCost), va fatto nel QPProblem builder.
-  // Qui mettiamo un proxy stabile e utile per debug:
+  // Proxy cost for debug
   cost_ = getError().squaredNorm() + getVelocityError().squaredNorm();
 }
 
@@ -216,56 +264,12 @@ void CartesianImpl::publish()
   }
 }
 
-void CartesianImpl::_updateInternal(const Eigen::VectorXd& x)
-{
-  if(OPTIONS.set_ext_lambda)
-    setLambda(buffer_lambda1_, buffer_lambda2_);
-
-  if(OPTIONS.set_ext_weight)
-  {
-    Eigen::Matrix<double,6,6> W = Eigen::Matrix<double,6,6>::Identity();
-    W.diagonal().setConstant(buffer_weight_diag_);
-    setWeight(W);
-  }
-
-  if(OPTIONS.set_ext_gains)
-  {
-    Eigen::Matrix<double,6,6> Kp = Eigen::Matrix<double,6,6>::Zero();
-    Eigen::Matrix<double,6,6> Kd = Eigen::Matrix<double,6,6>::Zero();
-
-    Kp(0,0)=buffer_kp_x_;     Kp(1,1)=buffer_kp_y_;     Kp(2,2)=buffer_kp_z_;
-    Kp(3,3)=buffer_kp_roll_;  Kp(4,4)=buffer_kp_pitch_; Kp(5,5)=buffer_kp_yaw_;
-
-    Kd(0,0)=buffer_kd_x_;     Kd(1,1)=buffer_kd_y_;     Kd(2,2)=buffer_kd_z_;
-    Kd(3,3)=buffer_kd_roll_;  Kd(4,4)=buffer_kd_pitch_; Kd(5,5)=buffer_kd_yaw_;
-
-    setKp(Kp);
-    setKd(Kd);
-  }
-
-  if(OPTIONS.set_ext_reference)
-  {
-    if(is_continuous_)
-    {
-      setReference(*buffer_reference_pose_.readFromRT(),
-                   *buffer_reference_twist_.readFromRT());
-    }
-    else
-    {
-      trj_->update(period_);
-      trj_->getReference(tmp_affine3d_, &tmp_vector6d_);
-      setReference(tmp_affine3d_, tmp_vector6d_);
-    }
-  }
-
-  // Core task update: build A,b from x
-  update(x);
-}
-
 bool CartesianImpl::reset()
 {
+  // reset task core
   CartesianTask::reset();
 
+  // reset marker UI
   makeMarker(getDistalLink(), getBaseLink(),
              static_cast<unsigned int>(control_type_), true);
   menu_handler_.reApply(interactive_marker_server_);
@@ -369,10 +373,6 @@ void CartesianImpl::processFeedback(const visualization_msgs::InteractiveMarkerF
 
 void CartesianImpl::referenceCallback(const wolf_msgs::Cartesian::ConstPtr& msg)
 {
-  double period = period_;
-  if(last_time_ != 0.0)
-    period = msg->header.stamp.toSec() - last_time_;
-
   Eigen::Affine3d pose_reference = Eigen::Affine3d::Identity();
   Eigen::Matrix<double,6,1> twist_reference = Eigen::Matrix<double,6,1>::Zero();
 
@@ -387,7 +387,6 @@ void CartesianImpl::referenceCallback(const wolf_msgs::Cartesian::ConstPtr& msg)
   buffer_reference_twist_.writeFromNonRT(twist_reference);
 
   last_time_ = msg->header.stamp.toSec();
-  (void)period;
 }
 
 visualization_msgs::InteractiveMarkerControl& CartesianImpl::makeSTLControl(visualization_msgs::InteractiveMarker& msg)

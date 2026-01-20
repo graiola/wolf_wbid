@@ -37,6 +37,10 @@ namespace wolf_wbid {
 /**
  * Base interface for ROS wrappers (ROS1/ROS2).
  * IMPORTANT: do NOT include ROS headers here.
+ *
+ * This class defines the *single* stable entrypoint the solver will call: update(x).
+ * It uses the Template Method pattern:
+ *   update(x) = applyExternalKnobs() + applyExternalReference() + doUpdate(x)
  */
 class TaskWrapperInterface
 {
@@ -50,18 +54,22 @@ public:
     std::atomic<bool> set_ext_reference = false;
   } OPTIONS;
 
-  TaskWrapperInterface(const std::string& task_name,
+  TaskWrapperInterface(const std::string& task_name, // TODO Remove task name, use task id
                        const std::string& robot_name,
                        const double& period);
 
   virtual ~TaskWrapperInterface() = default;
 
+  // Solver entrypoint (single, deterministic)
+  void update(const Eigen::VectorXd& x);
+
+  // Wrapper API (no ROS headers here)
   virtual void publish() = 0;
   virtual void loadParams() = 0;
   virtual void registerReconfigurableVariables() {}
   virtual void updateCost(const Eigen::VectorXd& x) = 0;
 
-  // DDR callbacks (keep legacy API)
+  // DDR callbacks (keep legacy API) -> they only write buffers
   void setLambda1(double value);
   void setLambda2(double value);
   void setWeightDiag(double value);
@@ -79,6 +87,15 @@ public:
   void setKdRoll(double value);
   void setKdPitch(double value);
   void setKdYaw(double value);
+
+protected:
+  // Hooks called by update(x)
+  // Default: no-op. Concrete wrappers (ROS handlers) override what they need.
+  virtual void applyExternalKnobs() {}
+  virtual void applyExternalReference() {}
+
+  // Task-core update (A,b,errors,...). Must be implemented by the stable handle classes.
+  virtual void doUpdate(const Eigen::VectorXd& x) = 0;
 
 protected:
   double      period_{0.001};
@@ -120,6 +137,10 @@ protected:
 
 // --------------------
 // Stable task handles used by IDProblem
+// Each handle:
+//  - exposes a single update(x) (hides the task-base update to avoid ambiguity)
+//  - implements doUpdate(x) by calling the task-core update
+//  - can implement common applyExternalKnobs() if desired (later)
 // --------------------
 
 // --------------------
@@ -137,12 +158,18 @@ public:
             const std::string& base_link,
             const IDVariables& vars,
             const double& period = 0.001,
-            const bool& use_mesh = true)
+            const bool& /*use_mesh*/ = true)
   : CartesianTask(task_id, robot, distal_link, base_link, vars)
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
+  // IMPORTANT: expose a single update(x) to the solver
+  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+
   virtual bool reset() = 0;
+
+protected:
+  void doUpdate(const Eigen::VectorXd& x) final { CartesianTask::update(x); }
 };
 
 // --------------------
@@ -162,7 +189,12 @@ public:
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
+  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+
   virtual bool reset() = 0;
+
+protected:
+  void doUpdate(const Eigen::VectorXd& x) final { ComTask::update(x); }
 };
 
 // --------------------
@@ -182,7 +214,12 @@ public:
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
+  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+
   virtual bool reset() = 0;
+
+protected:
+  void doUpdate(const Eigen::VectorXd& x) final { WrenchTask::update(x); }
 };
 
 class AngularMomentum : public AngularMomentumTask, public TaskWrapperInterface
@@ -199,7 +236,12 @@ public:
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
+  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+
   virtual bool reset() = 0;
+
+protected:
+  void doUpdate(const Eigen::VectorXd& x) final { AngularMomentumTask::update(x); }
 };
 
 class Postural : public PosturalTask, public TaskWrapperInterface
@@ -216,7 +258,12 @@ public:
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
+  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+
   virtual bool reset() = 0;
+
+protected:
+  void doUpdate(const Eigen::VectorXd& x) final { PosturalTask::update(x); }
 };
 
 } // namespace wolf_wbid

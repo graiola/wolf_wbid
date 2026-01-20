@@ -1,7 +1,3 @@
-// ============================================================================
-// File: src/task_ros_wrappers/momentum.cpp
-// ============================================================================
-
 /**
  * @file momentum.cpp
  * @author Gennaro Raiola
@@ -9,9 +5,11 @@
  */
 
 #include <wolf_wbid/task_ros_wrappers/momentum.h>
+
+#include <wolf_controller_utils/converters.h>
 #include <stdexcept>
 
-using namespace wolf_wbid;
+namespace wolf_wbid {
 
 AngularMomentumImpl::AngularMomentumImpl(const std::string& robot_name,
                                          QuadrupedRobot& robot,
@@ -21,6 +19,7 @@ AngularMomentumImpl::AngularMomentumImpl(const std::string& robot_name,
   : AngularMomentum(robot_name, robot, vars, task_id, period)
   , TaskRosHandler<wolf_msgs::CartesianTask>(task_id, robot_name, period)
 {
+  // nothing else: no subscribers, no buffers, etc.
 }
 
 void AngularMomentumImpl::registerReconfigurableVariables()
@@ -38,6 +37,7 @@ void AngularMomentumImpl::registerReconfigurableVariables()
         boost::bind(&TaskWrapperInterface::setWeightDiag, this, _1),
         "set weight diag", 0.0, 1000.0);
 
+  // Momentum gain (3x3 diag) -> we reuse kp_roll/pitch/yaw buffers & setters
   Eigen::Matrix3d K = getMomentumGain();
   ddr_server_->registerVariable<double>("K_roll",  K(0,0), boost::bind(&TaskWrapperInterface::setKpRoll,  this,_1), "K(0,0)", 0.0, 1000.0);
   ddr_server_->registerVariable<double>("K_pitch", K(1,1), boost::bind(&TaskWrapperInterface::setKpPitch, this,_1), "K(1,1)", 0.0, 1000.0);
@@ -59,18 +59,18 @@ void AngularMomentumImpl::loadParams()
   if(lambda1 < 0.0 || weight < 0.0)
     throw std::runtime_error("AngularMomentumImpl::loadParams(): lambda/weight must be >= 0");
 
-  buffer_lambda1_ = lambda1;
+  buffer_lambda1_     = lambda1;
   buffer_weight_diag_ = weight;
 
+  // push immediately (startup)
   setLambda(lambda1);
+  setWeight(Eigen::Matrix3d::Identity() * weight);
 
-  Eigen::Matrix3d Wd = Eigen::Matrix3d::Identity() * weight;
-  setWeight(Wd);
-
+  // Momentum gain K (diag)
   Eigen::Matrix3d K = Eigen::Matrix3d::Zero();
   bool use_identity = false;
 
-  for(unsigned int i=0; i<wolf_controller_utils::_rpy.size(); i++)
+  for(unsigned int i = 0; i < wolf_controller_utils::_rpy.size(); i++)
   {
     if(!nh_.getParam("gains/" + task_name_ + "/K/" + wolf_controller_utils::_rpy[i], K(i,i)))
       use_identity = true;
@@ -82,6 +82,7 @@ void AngularMomentumImpl::loadParams()
   if(use_identity)
     K = Eigen::Matrix3d::Identity();
 
+  // store in "kp rpy" buffers (we are reusing those for momentum K)
   buffer_kp_roll_  = K(0,0);
   buffer_kp_pitch_ = K(1,1);
   buffer_kp_yaw_   = K(2,2);
@@ -89,13 +90,7 @@ void AngularMomentumImpl::loadParams()
   setMomentumGain(K);
 }
 
-void AngularMomentumImpl::updateCost(const Eigen::VectorXd& x)
-{
-  const Eigen::VectorXd r = A() * x - b();
-  cost_ = 0.5 * (r.transpose() * W() * r)(0,0);
-}
-
-void AngularMomentumImpl::update(const Eigen::VectorXd& x)
+void AngularMomentumImpl::applyExternalKnobs()
 {
   if(OPTIONS.set_ext_lambda)
     setLambda(buffer_lambda1_.load());
@@ -103,20 +98,29 @@ void AngularMomentumImpl::update(const Eigen::VectorXd& x)
   if(OPTIONS.set_ext_weight)
   {
     const double w = buffer_weight_diag_.load();
-    Eigen::Matrix3d Wd = Eigen::Matrix3d::Identity() * w;
-    setWeight(Wd);
+    setWeight(Eigen::Matrix3d::Identity() * w);
   }
 
   if(OPTIONS.set_ext_gains)
   {
-    tmp_matrix3d_.setZero();
-    tmp_matrix3d_(0,0) = buffer_kp_roll_.load();
-    tmp_matrix3d_(1,1) = buffer_kp_pitch_.load();
-    tmp_matrix3d_(2,2) = buffer_kp_yaw_.load();
-    setMomentumGain(tmp_matrix3d_);
+    Eigen::Matrix3d K = Eigen::Matrix3d::Zero();
+    K(0,0) = buffer_kp_roll_.load();
+    K(1,1) = buffer_kp_pitch_.load();
+    K(2,2) = buffer_kp_yaw_.load();
+    setMomentumGain(K);
   }
+}
 
-  AngularMomentumTask::update(x);
+void AngularMomentumImpl::applyExternalReference()
+{
+  // typically unused for angular momentum in your current pipeline
+  // (reference comes from robot state estimator / controller logic)
+}
+
+void AngularMomentumImpl::updateCost(const Eigen::VectorXd& x)
+{
+  const Eigen::VectorXd r = A() * x - b();
+  cost_ = 0.5 * (r.transpose() * W() * r)(0,0);
 }
 
 void AngularMomentumImpl::publish()
@@ -131,8 +135,8 @@ void AngularMomentumImpl::publish()
     // Reuse CartesianTask message fields for angular momentum:
     // - rpy_actual    := actual angular momentum L
     // - rpy_reference := desired angular momentum (cached)
-    Eigen::Vector3d L_act = getActualAngularMomentum();
-    Eigen::Vector3d L_ref = getCachedDesiredAngularMomentum();
+    const Eigen::Vector3d L_act = getActualAngularMomentum();
+    const Eigen::Vector3d L_ref = getCachedDesiredAngularMomentum();
 
     wolf_controller_utils::vector3dToVector3(L_act, rt_pub_->msg_.rpy_actual);
     wolf_controller_utils::vector3dToVector3(L_ref, rt_pub_->msg_.rpy_reference);
@@ -147,3 +151,5 @@ bool AngularMomentumImpl::reset()
 {
   return AngularMomentumTask::reset();
 }
+
+} // namespace wolf_wbid

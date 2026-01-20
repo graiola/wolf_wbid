@@ -14,7 +14,7 @@
 namespace wolf_wbid {
 
 ComImpl::ComImpl(const std::string& robot_name,
-                 const std::string& task_id, 
+                 const std::string& task_id,
                  QuadrupedRobot& robot,
                  const IDVariables& vars,
                  const double& period)
@@ -68,7 +68,6 @@ void ComImpl::loadParams()
 {
   double lambda1, lambda2, weight;
 
-  // NOTE: use task_name_ (from TaskWrapperInterface) for param namespace consistency
   if(!nh_.getParam("gains/" + task_name_ + "/lambda1", lambda1)) lambda1 = getLambda();
   if(!nh_.getParam("gains/" + task_name_ + "/lambda2", lambda2)) lambda2 = getLambda2();
   if(!nh_.getParam("gains/" + task_name_ + "/weight",  weight))  weight  = getWeight()(0,0);
@@ -80,6 +79,7 @@ void ComImpl::loadParams()
   buffer_lambda2_     = lambda2;
   buffer_weight_diag_ = weight;
 
+  // push immediately (startup)
   setLambda(lambda1, lambda2);
   setWeight(Eigen::Matrix3d::Identity() * weight);
 
@@ -114,10 +114,8 @@ void ComImpl::loadParams()
   setKd(Kd);
 }
 
-void ComImpl::update(const Eigen::VectorXd& x)
+void ComImpl::applyExternalKnobs()
 {
-  // apply external knobs (like your old OpenSoT _update wrapper)
-
   if(OPTIONS.set_ext_lambda)
     setLambda(buffer_lambda1_.load(), buffer_lambda2_.load());
 
@@ -126,27 +124,29 @@ void ComImpl::update(const Eigen::VectorXd& x)
 
   if(OPTIONS.set_ext_gains)
   {
-    tmp_matrix3d_.setZero();
-    tmp_matrix3d_(0,0) = buffer_kp_x_.load();
-    tmp_matrix3d_(1,1) = buffer_kp_y_.load();
-    tmp_matrix3d_(2,2) = buffer_kp_z_.load();
-    setKp(tmp_matrix3d_);
+    Eigen::Matrix3d Kp = Eigen::Matrix3d::Zero();
+    Eigen::Matrix3d Kd = Eigen::Matrix3d::Zero();
 
-    tmp_matrix3d_.setZero();
-    tmp_matrix3d_(0,0) = buffer_kd_x_.load();
-    tmp_matrix3d_(1,1) = buffer_kd_y_.load();
-    tmp_matrix3d_(2,2) = buffer_kd_z_.load();
-    setKd(tmp_matrix3d_);
+    Kp(0,0) = buffer_kp_x_.load();
+    Kp(1,1) = buffer_kp_y_.load();
+    Kp(2,2) = buffer_kp_z_.load();
+
+    Kd(0,0) = buffer_kd_x_.load();
+    Kd(1,1) = buffer_kd_y_.load();
+    Kd(2,2) = buffer_kd_z_.load();
+
+    setKp(Kp);
+    setKd(Kd);
   }
+}
 
-  if(OPTIONS.set_ext_reference)
-  {
-    setReference(*buffer_reference_pos_.readFromRT(),
-                 *buffer_reference_vel_.readFromRT());
-  }
+void ComImpl::applyExternalReference()
+{
+  if(!OPTIONS.set_ext_reference)
+    return;
 
-  // run task math
-  ComTask::update(x);
+  setReference(*buffer_reference_pos_.readFromRT(),
+               *buffer_reference_vel_.readFromRT());
 }
 
 void ComImpl::updateCost(const Eigen::VectorXd& x)
@@ -176,7 +176,7 @@ void ComImpl::publish()
     getReference(tmp_vector3d_);
     wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.position_reference);
 
-    // REFERENCE velocity (cached, OpenSoT-like)
+    // REFERENCE velocity (cached)
     tmp_vector3d_ = getCachedVelocityReference();
     wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.velocity_reference);
 
@@ -193,10 +193,10 @@ bool ComImpl::reset()
 
   // sync RT buffers with current actual CoM
   getActualPose(tmp_vector3d_);
-  buffer_reference_pos_.initRT(tmp_vector3d_);
+  buffer_reference_pos_.writeFromNonRT(tmp_vector3d_);
 
   tmp_vector3d_.setZero();
-  buffer_reference_vel_.initRT(tmp_vector3d_);
+  buffer_reference_vel_.writeFromNonRT(tmp_vector3d_);
 
   return ok;
 }

@@ -1,5 +1,7 @@
 #include <wolf_wbid/id_problem.h>
 
+#include <wolf_wbid/wbid/qp/qp_solver_factory.h>
+
 #include <stdexcept>
 #include <limits>
 
@@ -50,84 +52,138 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
                                        foot_names_,
                                        IDVariables::ContactModel::POINT_CONTACT);
 
-  // --- tasks
+  const std::string base_link = model_->getBaseLinkName();
+
+  // --- tasks ---------------------------------------------------------------
+  // Feet Cartesian tasks
   for(const auto& fn : foot_names_)
   {
-    feet_[fn] = std::make_shared<CartesianImpl>(robot_name, fn, *model_, fn,
-                                                WORLD_FRAME_NAME, dt);
+    feet_[fn] = std::make_shared<CartesianImpl>(
+      robot_name,
+      fn,          // task_id
+      *model_,
+      fn,          // distal link
+      base_link,   // base link (NOT world)
+      *vars_,
+      dt,
+      /*use_mesh=*/false
+    );
+
     feet_[fn]->setLambda(0., 0.);
-    feet_[fn]->setWeightIsDiagonalFlag(true);
     feet_[fn]->loadParams();
     feet_[fn]->registerReconfigurableVariables();
   }
 
+  // Arms Cartesian tasks
   for(const auto& ee : ee_names_)
   {
-    arms_[ee] = std::make_shared<CartesianImpl>(robot_name, ee, *model_, ee,
-                                                model_->getBaseLinkName(), dt);
+    arms_[ee] = std::make_shared<CartesianImpl>(
+      robot_name,
+      ee,          // task_id
+      *model_,
+      ee,          // distal link
+      base_link,
+      *vars_,
+      dt,
+      /*use_mesh=*/false
+    );
+
     arms_[ee]->setLambda(1., 1.);
-    arms_[ee]->setWeightIsDiagonalFlag(true);
     arms_[ee]->OPTIONS.set_ext_reference = true;
     arms_[ee]->loadParams();
     arms_[ee]->registerReconfigurableVariables();
   }
 
+  // Wrench tasks (POINT_CONTACT force tracking)
   for(const auto& fn : foot_names_)
   {
-    sarawrenches_[fn] = std::make_shared<WrenchImpl>(robot_name,
-                                             fn + "_wrench",
-                                             fn,
-                                             *vars_,
-                                             dt);
-    wrenches_[fn]->setLambda(1.);
-    wrenches_[fn]->setWeightIsDiagonalFlag(true);
-    wrenches_[fn]->OPTIONS.set_ext_lambda = true;
+    wrenches_[fn] = std::make_shared<WrenchImpl>(
+      robot_name,
+      fn + std::string("_wrench"), // task_id
+      fn,                          // contact_name
+      *vars_,
+      dt
+    );
+
+    // NOTE: OpenSoT-free wrench has no lambda (so no set_ext_lambda / setLambda)
+    // Keep reference/weight configurable if you want:
+    wrenches_[fn]->OPTIONS.set_ext_reference = true;
     wrenches_[fn]->loadParams();
     wrenches_[fn]->registerReconfigurableVariables();
   }
 
-  angular_momentum_ = std::make_shared<AngularMomentumImpl>(robot_name, *model_, dt);
+  // Angular momentum
+  angular_momentum_ = std::make_shared<AngularMomentumImpl>(
+    robot_name,
+    *model_,
+    *vars_,
+    "angular_momentum",
+    dt
+  );
+
   angular_momentum_->setLambda(0.);
-  angular_momentum_->setWeightIsDiagonalFlag(true);
   angular_momentum_->setReference(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
   angular_momentum_->setMomentumGain(Eigen::Matrix3d::Identity());
   angular_momentum_->loadParams();
   angular_momentum_->registerReconfigurableVariables();
 
-  waist_ = std::make_shared<CartesianImpl>(robot_name, "waist", *model_, model_->getBaseLinkName(),
-                                           WORLD_FRAME_NAME, dt);
+  // Waist Cartesian task
+  waist_ = std::make_shared<CartesianImpl>(
+    robot_name,
+    "waist",
+    *model_,
+    base_link,     // distal link = base itself (ok se vuoi controllare la posa del base)
+    base_link,     // base link
+    *vars_,
+    dt,
+    /*use_mesh=*/false
+  );
+
   waist_->setLambda(1., 1.);
-  waist_->setWeightIsDiagonalFlag(true);
   waist_->loadParams();
   waist_->registerReconfigurableVariables();
 
-  postural_ = std::make_shared<PosturalImpl>(robot_name, *model_, "postural", dt);
+  // Postural
+  postural_ = std::make_shared<PosturalImpl>(
+    robot_name,
+    "postural",
+    *model_,
+    *vars_,
+    dt
+  );
+
   postural_->setLambda(1., 1.);
-  postural_->setWeightIsDiagonalFlag(true);
   postural_->loadParams();
   postural_->registerReconfigurableVariables();
   postural_->setReference(model_->getStandUpJointPostion());
 
-  // NOTE: ComImpl signature must be (robot_name, robot, vars, task_id, period)
-  com_ = std::make_shared<ComImpl>(robot_name, *model_, *vars_, "com", dt);
+  // CoM
+  com_ = std::make_shared<ComImpl>(
+    robot_name,
+    "com",
+    *model_,
+    *vars_,
+    dt
+  );
+
   com_->setLambda(1., 1.);
-  com_->setWeightIsDiagonalFlag(true);
   com_->loadParams();
   com_->registerReconfigurableVariables();
 
-  // --- constraints
+  // --- constraints ---------------------------------------------------------
   constraints_.clear();
 
   // friction cones per foot
   friction_cones_.clear();
   for(const auto& fn : foot_names_)
   {
-    auto fc = std::make_shared<FrictionConeConstraint>(fn, *vars_, fc_R_, mu_);
+    // ctor: (contact_name, idvars, mu, R)
+    auto fc = std::make_shared<FrictionConeConstraint>(fn, *vars_, mu_, fc_R_);
     friction_cones_[fn] = fc;
     constraints_.push_back(fc);
   }
 
-  // force bounds per foot (bounds-only constraint => uses l/u inside ConstraintBase)
+  // force bounds per foot
   force_bounds_.clear();
   for(const auto& fn : foot_names_)
   {
@@ -139,19 +195,32 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     constraints_.push_back(cb);
   }
 
-  // torque limits (linear constraints)
+  // torque limits
   {
     Eigen::VectorXd tau_max;
     model_->getEffortLimits(tau_max);
-    tau_max.head(FLOATING_BASE_DOFS).setZero();
+
+    // if your model includes floating base dofs in tau_max, keep this:
+    if(tau_max.size() >= FLOATING_BASE_DOFS)
+      tau_max.head(FLOATING_BASE_DOFS).setZero();
+
     tau_max = 0.9 * tau_max;
 
-    torque_limits_ = std::make_shared<TorqueLimitsConstraint>(*model_, *vars_, foot_names_, tau_max);
+    // ctor: (name, robot, idvars, joints, tau_max)
+    torque_limits_ = std::make_shared<TorqueLimitsConstraint>(
+      "torque_limits",
+      *model_,
+      *vars_,
+      model_->getJointNames(),   // IMPORTANT: not foot_names_ !
+      tau_max
+    );
+
     constraints_.push_back(torque_limits_);
   }
 
   // solver
-  solver_ = CreateDefaultSolver(); // your factory
+  // TODO: replace with your real factory; for now keep what you had
+  solver_ = CreateDefaultSolver();
   if(!solver_) throw std::runtime_error("IDProblem::init(): solver factory returned null");
 
   // buffers
@@ -161,6 +230,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
 
   initialized_ = true;
 }
+
 
 void IDProblem::setControlMode(mode_t mode)
 {
@@ -317,7 +387,7 @@ void IDProblem::update()
   {
     if(friction_cones_.count(fn))
     {
-      friction_cones_.at(fn)->setContactRotationMatrix(fc_R_);
+      friction_cones_.at(fn)->setContactRotation(fc_R_);
       friction_cones_.at(fn)->setMu(mu_);
       friction_cones_.at(fn)->setEnabled(contact_enabled_[fn]); // optional policy: disable on swing
     }

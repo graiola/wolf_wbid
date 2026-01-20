@@ -10,6 +10,9 @@
 
 namespace wolf_wbid {
 
+class QuadrupedRobot;
+class IDVariables;
+
 class ComImpl : public Com, public TaskRosHandler<wolf_msgs::ComTask>
 {
 public:
@@ -27,9 +30,12 @@ public:
   void publish() override;
   bool reset() override;
 
-private:
+protected:
+  // ---- NEW: stable hooks called by TaskWrapperInterface::update(x)
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;
 
-  void _update(const Eigen::VectorXd& x) override;  
+private:
   void referenceCallback(const wolf_msgs::Com::ConstPtr& msg);
 
   realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_pos_;

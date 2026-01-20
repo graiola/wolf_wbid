@@ -6,16 +6,19 @@
 #define TASK_ROS_WRAPPERS_POSTURAL_H
 
 #include <memory>
+#include <string>
 
-// ROS msgs
+// ROS msg
 #include <wolf_msgs/PosturalTask.h>
 
 // WoLF
-#include <wolf_wbid/wbid/tasks/postural_task.h>
+#include <wolf_wbid/task_interface.h>
 #include <wolf_wbid/task_ros_wrappers/handler.h>
-#include <wolf_wbid/task_interface.h>   // la versione "micro" solo wrapper (senza OpenSoT)
 
 namespace wolf_wbid {
+
+class QuadrupedRobot;
+class IDVariables;
 
 class PosturalImpl : public Postural, public TaskRosHandler<wolf_msgs::PosturalTask>
 {
@@ -31,14 +34,14 @@ public:
   void registerReconfigurableVariables() override;
   void loadParams() override;
   void updateCost(const Eigen::VectorXd& x) override;
+
   void publish() override;
   bool reset() override;
 
 protected:
-  void _update(const Eigen::VectorXd& x) override;
-
-private:
-  double cost_{0.0};
+  // called by TaskWrapperInterface::update(x)
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;  // currently unused for postural (unless you add a topic later)
 };
 
 } // namespace wolf_wbid
