@@ -56,7 +56,7 @@ bool DynamicsEqualityConstraint::disableContact(const std::string& contact_link)
   return true;
 }
 
-void DynamicsEqualityConstraint::update(const Eigen::VectorXd& /*x*/)
+void DynamicsEqualityConstraint::update(const Eigen::VectorXd& x)
 {
   // 1) get B(q), h(q,qd)
   robot_.getInertiaMatrix(B_);
@@ -68,59 +68,75 @@ void DynamicsEqualityConstraint::update(const Eigen::VectorXd& /*x*/)
   Bu_ = B_.topRows(6);
   hu_ = h_.head(6);
 
-  // 2) Build equality: Bu*qddot - sum(Jf*f) = -hu
-  // Our QP variable x contains qddot block (full robot dofs, incl base first 6) then contact forces.
-  // We put everything into A_ * x = b, with b = -hu.
+  // 2) Build equality: Bu*qddot + hu + sum( -Jf * wrench_i ) = 0
+  // => A*x = b with b = -hu, A = [Bu, (-Jf * S_point)].
   A_.setZero();
 
-  // qddot block
   const auto& qb = vars_.qddotBlock();
   A_.block(0, qb.offset, 6, qb.dim) = Bu_;
 
-  // 3) contact contributions: (-Jf)*f
-  // OpenSoT uses Jtmp.block<6,6>(0,0).transpose(), i.e. base columns only.
-  // So we multiply that by contact force (3D) assuming point contact produces base wrench via those 6 cols transpose?:
-  // In OpenSoT, wrenches[i] is 6D or 3D depending on contact model; but in your point contact setup it's 3D.
-  // Their code still does (-Jf) * wrench[i]; that implies Jf is 6x3 for point contact in their serializer.
-  //
-  // Here we replicate the intent: map force (3) to base wrench using contact Jacobian at the contact point.
-  // We can obtain the full spatial Jacobian Jtmp (6 x n) of the contact link expressed in world.
-  // The generalized force from a point force is Jv_base^T * f, where Jv are the linear rows.
-  //
-  // BUT OpenSoT uses the 6x6 block (base part) transpose and multiplies by wrench variable.
-  // For POINT_CONTACT, safest consistent mapping:
-  //   use only linear part of base Jacobian: Jlin_base (3x6), then contribution to base eq is -Jlin_base^T * f (6x1)
-  // This yields 6 rows from 3 force components, as physically correct.
-  //
-  // So we implement: A_contact_block = -Jlin_base^T, where Jlin_base = Jtmp.topRows(3).leftCols(6).
-  //
-  // This matches the “floating base dynamics with external forces” and avoids an inconsistent 6x6*3 multiply.
+  Eigen::VectorXd r = Bu_ * x.segment(qb.offset, qb.dim) + hu_; // REMOVE
 
   for(size_t i = 0; i < contacts_.size(); ++i)
   {
     if(!enabled_[i]) continue;
 
     const std::string& c = contacts_[i];
-    if(!vars_.hasContact(c)) continue; // ignore if not in variable layout
+    if(!vars_.hasContact(c)) continue;
 
-    // get Jacobian of contact link in world
-    robot_.getJacobian(c, Jtmp_); // expected 6 x n
+    robot_.getJacobian(c, Jtmp_); // 6 x n (world), like OpenSoT
 
-    if(Jtmp_.rows() < 3 || Jtmp_.cols() < 6)
+    if(Jtmp_.rows() < 6 || Jtmp_.cols() < 6)
       throw std::runtime_error("DynamicsEqualityConstraint: Jacobian too small for contact " + c);
 
-    Eigen::Matrix<double,3,6> Jlin_base = Jtmp_.block<3,6>(0,0); // linear rows, base cols
+    //// OpenSoT:
+    ////   _Jf = _Jtmp.block<6,6>(0,0).transpose();
+    //Eigen::Matrix<double,6,6> Jf = Jtmp_.block<6,6>(0,0).transpose();
 
-    const auto& cb = vars_.contactBlock(c);
-    // A_ rows are 6, contact var dim is 3
-    // contribution: -Jlin_base^T * f
-    A_.block(0, cb.offset, 6, 3).noalias() += -Jlin_base.transpose();
+    //// POINT_CONTACT: wrench = [0; f] (assuming [tau; force])
+    //// so (-Jf) * wrench = (-Jf.rightCols(3)) * f
+    //Eigen::Matrix<double,6,3> Jf_point = Jf.rightCols<3>();   // if [tau;force]
+    //// If your wrench ordering is [force;tau], then use leftCols<3>() instead:
+    ////Eigen::Matrix<double,6,3> Jf_point = Jf.leftCols<3>();
+
+    //const auto& cb = vars_.contactBlock(c); // dim=3
+    //A_.block(0, cb.offset, 6, 3).noalias() += (-Jf_point);
+
+
+    // OpenSoT-style Jf
+    Eigen::Matrix<double,6,6> Jf = Jtmp_.block<6,6>(0,0).transpose();
+
+    // POINT_CONTACT embedding: wrench6 = [f; 0]  (force first, torque last)
+    Eigen::Matrix<double,6,3> S_point;
+    S_point.setZero();
+    S_point.block<3,3>(0,0).setIdentity();
+
+    // Contribution: (-Jf) * (S_point * f) = (-(Jf*S_point)) * f
+    Eigen::Matrix<double,6,3> Jf_point = -(Jf * S_point);
+
+    const auto& cb = vars_.contactBlock(c); // dim=3
+    A_.block(0, cb.offset, 6, 3).noalias() += Jf_point;
+
+
+    // REMOVE
+    Eigen::Matrix<double,6,1> w6; w6.setZero();
+    w6.head<3>() = x.segment(cb.offset, 3);   // [f;0] come ora
+    r -= Jf * w6;
   }
 
+  std::cerr << "[DYN] residual = " << r.transpose()
+          << " |r|=" << r.norm() << "\n";
+
+  /*std::cerr << "[DYN] contact=" << c << "\n";
+  std::cerr << "  hu=" << hu_.transpose() << "\n";
+  std::cerr << "  Jf_point colnorms=" << Jf_point.colwise().norm() << "\n";
+  std::cerr << "  Jf_point rowsums=" << Jf_point.rowwise().norm().transpose() << "\n";*/
+
   // b = -hu
-  Eigen::VectorXd b = -hu_;
-  setEqRows(lA_, uA_, b);
+  lA_ = -hu_;
+  uA_ = -hu_;
 }
+
 
 } // namespace wolf_wbid
 

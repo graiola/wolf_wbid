@@ -34,6 +34,7 @@
 #include <wolf_wbid/wbid/constraints/friction_cone_constraint.h>
 #include <wolf_wbid/wbid/constraints/contact_force_bounds_constraint.h>
 #include <wolf_wbid/wbid/constraints/torque_limits_constraint.h>
+#include <wolf_wbid/wbid/constraints/dynamics_equality_constraint.h>
 #include <wolf_wbid/task_interface.h>
 
 namespace wolf_wbid {
@@ -47,6 +48,7 @@ public:
 
   using Ptr = std::shared_ptr<IDProblem>;
   using UniquePtr = std::unique_ptr<IDProblem>;
+  
 
   explicit IDProblem(QuadrupedRobot::Ptr model);
   ~IDProblem();
@@ -54,6 +56,21 @@ public:
   void init(const std::string& robot_name, const double& dt);
 
   bool solve(Eigen::VectorXd& tau);
+
+  void enableDebug(bool enable) { debug_enabled_ = enable; }
+  void setDebugMask(uint32_t mask) { debug_mask_ = mask; }
+
+  enum DebugMask : uint32_t {
+    DBG_NONE = 0,
+    DBG_STATE = 1<<0,
+    DBG_QP_BOUNDS = 1<<1,
+    DBG_SOLUTION = 1<<2,
+    DBG_TAU = 1<<3,
+    DBG_CONTACTS = 1<<4,
+    DBG_TASKS = 1<<5,
+    DBG_CONSTRAINTS = 1<<6,
+    DBG_ALL = 0xFFFFFFFF
+  };
 
   const std::vector<Eigen::Vector6d>& getContactWrenches() const;
   const Eigen::VectorXd& getJointAccelerations() const;
@@ -104,6 +121,23 @@ public:
   void setControlMode(mode_t mode); // kept for compatibility (WPG only used)
 
 private:
+
+  bool debug_enabled_{false};
+  uint32_t debug_mask_{DBG_ALL};
+
+  void debugDumpSolveStep(const QPProblem* qp,
+                          const Eigen::VectorXd* x,
+                          const Eigen::VectorXd* tau,
+                          bool qp_built,
+                          bool qp_solved,
+                          bool torque_ok) const;
+
+  static void debugPrintVecStats(const std::string& name, const Eigen::VectorXd& v);
+  static void debugPrintMatStats(const std::string& name, const Eigen::MatrixXd& M);
+  static void debugPrintBoundsStats(const std::string& name,
+                                   const Eigen::VectorXd& l,
+                                   const Eigen::VectorXd& u);
+
   void activateExternalReferences(bool activate);
 
   void update();                       // tasks update + update constraint params
@@ -151,6 +185,7 @@ private:
   std::map<std::string, std::shared_ptr<FrictionConeConstraint>> friction_cones_;
   std::map<std::string, std::shared_ptr<ContactForceBoundsConstraint>> force_bounds_;
   std::shared_ptr<TorqueLimitsConstraint> torque_limits_;
+  std::shared_ptr<DynamicsEqualityConstraint> dynamics_eq_;
 
   // qp + solver
   QPProblem qp_;
