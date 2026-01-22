@@ -163,6 +163,7 @@ add_library(id_problem SHARED
     src/wbid/constraints/contact_force_bounds_constraint.cpp
     src/wbid/constraints/torque_limits_constraint.cpp
     src/wbid/constraints/dynamics_equality_constraint.cpp
+    src/wbid/constraints/base_accel_z_constraint.cpp
     src/wbid/tasks/aggregated_task_lsq.cpp
     src/wbid/tasks/angular_momentum_task.cpp
     src/wbid/tasks/cartesian_task.cpp

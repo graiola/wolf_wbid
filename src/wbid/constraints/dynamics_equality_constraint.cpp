@@ -75,8 +75,6 @@ void DynamicsEqualityConstraint::update(const Eigen::VectorXd& x)
   const auto& qb = vars_.qddotBlock();
   A_.block(0, qb.offset, 6, qb.dim) = Bu_;
 
-  Eigen::VectorXd r = Bu_ * x.segment(qb.offset, qb.dim) + hu_; // REMOVE
-
   for(size_t i = 0; i < contacts_.size(); ++i)
   {
     if(!enabled_[i]) continue;
@@ -116,21 +114,7 @@ void DynamicsEqualityConstraint::update(const Eigen::VectorXd& x)
 
     const auto& cb = vars_.contactBlock(c); // dim=3
     A_.block(0, cb.offset, 6, 3).noalias() += Jf_point;
-
-
-    // REMOVE
-    Eigen::Matrix<double,6,1> w6; w6.setZero();
-    w6.head<3>() = x.segment(cb.offset, 3);   // [f;0] come ora
-    r -= Jf * w6;
   }
-
-  std::cerr << "[DYN] residual = " << r.transpose()
-          << " |r|=" << r.norm() << "\n";
-
-  /*std::cerr << "[DYN] contact=" << c << "\n";
-  std::cerr << "  hu=" << hu_.transpose() << "\n";
-  std::cerr << "  Jf_point colnorms=" << Jf_point.colwise().norm() << "\n";
-  std::cerr << "  Jf_point rowsums=" << Jf_point.rowwise().norm().transpose() << "\n";*/
 
   // b = -hu
   lA_ = -hu_;

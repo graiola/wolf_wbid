@@ -240,6 +240,17 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   dynamics_eq_->setEnabled(true);
   constraints_.push_back(dynamics_eq_);
 
+  // --- hard constraint: prevent "falling solution" (qddot_base_z = 0)
+  base_accel_z_ = std::make_shared<BaseAccelZConstraint>(
+    "base_accel_z",
+    *vars_,
+    BaseAccelZConstraint::Mode::EQUALITY,
+    /*eps=*/0.0
+  );
+  base_accel_z_->setEnabled(true);
+  constraints_.push_back(base_accel_z_);
+
+
   // solver
   solver_ = CreateDefaultSolver();
   if(!solver_) throw std::runtime_error("IDProblem::init(): solver factory returned null");
@@ -825,6 +836,14 @@ void IDProblem::debugDumpSolveStep(const QPProblem* qp,
     catch(...) {
       std::cout << "[DBG] (note) could not print x blocks (vars_ API mismatch)\n";
     }
+
+    int m = qp->m();
+    Eigen::MatrixXd A_dyn = qp->A.block(m-6, 0, 6, qp->n());
+    Eigen::VectorXd l_dyn = qp->lA.segment(m-6, 6);
+    Eigen::VectorXd r_qp  = A_dyn * (*x) - l_dyn;
+
+    std::cout << "[DBG] dyn_qp_residual = " << r_qp.transpose()
+              << " |r|=" << r_qp.norm() << "\n";
   }
 
   // --- tau
