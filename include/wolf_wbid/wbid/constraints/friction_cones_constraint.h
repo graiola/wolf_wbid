@@ -11,7 +11,13 @@
 
 namespace wolf_wbid {
 
-class FrictionConesConstraint : public IConstraint
+/**
+ * Aggregatore: impila N FrictionConeConstraint (5 righe ciascuna)
+ * in un'unica constraint lineare (A, lA, uA) conforme a IConstraint.
+ *
+ * Nota: non aggiunge bounds su variabili (l/u), solo vincoli lineari.
+ */
+class FrictionConesConstraint final : public ConstraintBase
 {
 public:
   using Ptr = std::shared_ptr<FrictionConesConstraint>;
@@ -22,25 +28,15 @@ public:
                           const std::vector<Eigen::Matrix3d>& wRl_list,
                           const std::vector<double>& mu_list);
 
-  void update(const Eigen::VectorXd& x) override; // no-op
-  const Eigen::MatrixXd& Aineq() const override { return Aineq_; }
-  const Eigen::VectorXd& bLowerBound() const override { return bLower_; }
-  const Eigen::VectorXd& bUpperBound() const override { return bUpper_; }
-  int rows() const override { return static_cast<int>(bUpper_.size()); }
-  const std::string& name() const override { return name_; }
+  void update(const Eigen::VectorXd& x) override; // di default no-op (o rebuild se vuoi)
 
   FrictionConeConstraint::Ptr getFrictionCone(const std::string& contact_name);
 
-  void rebuild(); // re-stack internal cones into Aineq/bounds
+  // Re-impila A/lA/uA dai singoli coni
+  void rebuild();
 
 private:
-  std::string name_;
   std::vector<FrictionConeConstraint::Ptr> cones_;
-
-  Eigen::MatrixXd Aineq_;
-  Eigen::VectorXd bLower_;
-  Eigen::VectorXd bUpper_;
 };
 
 } // namespace wolf_wbid
-

@@ -2,6 +2,7 @@
 
 #include <Eigen/Dense>
 #include <string>
+#include <memory>
 
 #include <wolf_wbid/wbid/constraint_base.h>
 #include <wolf_wbid/wbid/id_variables.h>
@@ -21,6 +22,9 @@ namespace wolf_wbid {
 class FrictionConeConstraint final : public ConstraintBase
 {
 public:
+
+  using Ptr = std::shared_ptr<FrictionConeConstraint>;
+
   FrictionConeConstraint(const std::string& contact_name,
                          const IDVariables& vars,
                          double mu,
@@ -30,6 +34,8 @@ public:
 
   void setMu(double mu);
   void setContactRotation(const Eigen::Matrix3d& wRl);
+
+  const std::string& contactName() const { return contact_; }
 
 private:
   void computeCi();

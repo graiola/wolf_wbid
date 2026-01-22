@@ -1,5 +1,5 @@
 #pragma once
-#include <wolf_wbid/wbid/task_lsq.h>
+#include <wolf_wbid/wbid/tasks/task_lsq.h>
 #include <vector>
 
 namespace wolf_wbid {
@@ -10,7 +10,7 @@ public:
   AggregatedTaskLSQ(std::string name, std::vector<ITaskLSQ*> tasks)
   : name_(std::move(name)), tasks_(std::move(tasks)) {}
 
-  std::string name() const override { return name_; }
+  std::string name() const { return name_; }
 
   void compute(const IDVariables& vars, LsqTerm& out) override;
 

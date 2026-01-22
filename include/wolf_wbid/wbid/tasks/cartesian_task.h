@@ -98,6 +98,12 @@ private:
   void computeOrientationError(const Eigen::Matrix3d& R_des, const Eigen::Matrix3d& R_act, Eigen::Vector3d& e) const;
   void computeCartesianInertiaInverse(); // for GainType::Force
 
+  bool readRobotState();
+
+  // cached robot state (size = robot_.getJointNum())
+  Eigen::VectorXd q_;
+  Eigen::VectorXd qd_;
+
   std::string task_id_;
   QuadrupedRobot& robot_;
   const IDVariables& vars_;

@@ -108,7 +108,7 @@ private:
 
   void update();                       // tasks update + update constraint params
   bool buildQP(QPProblem& qp);         // tasks -> H,g ; constraints -> bounds + A,lA,uA
-  bool solveQP(IQPSolver& solver, QPProblem& qp, Eigen::VectorXd& x);
+  bool solveQP(IQPSolver& solver, const QPProblem& qp, Eigen::VectorXd& x);
   bool computeTauFromSolution(const Eigen::VectorXd& x, Eigen::VectorXd& tau);
 
   // objective helpers

@@ -17,8 +17,7 @@ class ITaskLSQ
 {
 public:
   virtual ~ITaskLSQ() = default;
-  virtual std::string name() const = 0;
-
+  
   // produce A,b,w for current model/refs (using vars to know n and block offsets)
   virtual void compute(const IDVariables& vars, LsqTerm& out) = 0;
 };

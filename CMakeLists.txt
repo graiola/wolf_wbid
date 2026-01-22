@@ -57,6 +57,9 @@ add_subdirectory(third_party/MatLogger2)
 add_subdirectory(third_party/XBotInterface)
 add_subdirectory(third_party/ModelInterfaceRBDL)
 
+# Solvers
+add_subdirectory(external/eiQuadProg-ext)
+
 # ROS
 find_package(catkin QUIET)
 find_package(ament_cmake QUIET)
@@ -71,6 +74,7 @@ if(${catkin_FOUND})
         third_party/XBotInterface/include
         third_party/XBotInterface/srdfdom_advr/include
         third_party/ModelInterfaceRBDL/include
+        external/eiQuadProg-ext/include
       LIBRARIES
         quadruped_robot
         cartesian_trajectory
@@ -81,6 +85,7 @@ if(${catkin_FOUND})
         XBotInterface
         XBotCoreModel
         ModelInterfaceRBDL
+        eiQuadProg
       CATKIN_DEPENDS
         wolf_msgs
         wolf_controller_utils
@@ -120,8 +125,7 @@ target_link_libraries(quadruped_robot
 
 add_library(cartesian_trajectory SHARED
     src/cartesian_trajectory.cpp)
-target_link_libraries(cartesian_trajectory
-    OpenSoT)
+target_link_libraries(cartesian_trajectory)
 
 add_library(task_wrappers SHARED
     src/task_interface.cpp
@@ -152,6 +156,8 @@ target_link_libraries(task_wrappers
 add_library(id_problem SHARED 
     src/id_problem.cpp
     src/wbid/id_variables.cpp
+    src/wbid/qp/eiquadprog_solver.cpp
+    src/wbid/qp/qp_solver_factory.cpp
     src/wbid/constraints/friction_cone_constraint.cpp
     src/wbid/constraints/friction_cones_constraint.cpp
     src/wbid/constraints/contact_force_bounds_constraint.cpp
@@ -169,7 +175,8 @@ target_link_libraries(id_problem
     task_wrappers 
     XBotInterface
     XBotCoreModel
-    ModelInterfaceRBDL)
+    ModelInterfaceRBDL
+    eiQuadProg)
 
 # Installation
 install(
@@ -188,6 +195,7 @@ install(TARGETS
         XBotCoreModel
         ModelInterfaceRBDL
         matlogger2
+        eiQuadProg
         DESTINATION lib/${PROJECT_NAME}
         LIBRARY DESTINATION lib
 )

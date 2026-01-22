@@ -3,6 +3,7 @@
 #include <Eigen/Dense>
 #include <atomic>
 #include <string>
+#include <memory>
 
 #include <wolf_wbid/wbid/tasks/task_lsq.h>
 
@@ -24,7 +25,7 @@ class WrenchTask : public ITaskLSQ
 public:
   using Ptr = std::shared_ptr<WrenchTask>;
 
-  WrenchTask(std::string task_id_,
+  WrenchTask(std::string task_id,
              std::string contact_name,
              double weight = 1.0);
 

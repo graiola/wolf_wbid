@@ -601,10 +601,26 @@ bool IDProblem::buildQP(QPProblem& qp)
   return true;
 }
 
-bool IDProblem::solveQP(IQPSolver& solver, QPProblem& qp, Eigen::VectorXd& x)
+bool IDProblem::solveQP(IQPSolver& solver, const QPProblem& qp, Eigen::VectorXd& x)
 {
-  return solver.solve(qp, x);
+  const QPSolution sol = solver.solve(qp);
+
+  if(!sol.success) {
+    // opzionale: log / throw / salvare status
+    // last_qp_status_ = sol.status;
+    return false;
+  }
+
+  if(sol.x.size() != qp.n()) {
+    throw std::runtime_error("IDProblem::solveQP(): solver returned wrong x size");
+  }
+
+  x = sol.x;
+  // opzionale: last_qp_obj_ = sol.objective;
+  // opzionale: last_qp_status_ = sol.status;
+  return true;
 }
+
 
 bool IDProblem::computeTauFromSolution(const Eigen::VectorXd& x, Eigen::VectorXd& tau)
 {

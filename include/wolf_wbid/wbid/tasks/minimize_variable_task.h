@@ -1,5 +1,5 @@
 #pragma once
-#include <wolf_wbid/wbid/task_lsq.h>
+#include <wolf_wbid/wbid/tasks/task_lsq.h>
 #include <functional>
 
 namespace wolf_wbid {
@@ -19,7 +19,7 @@ public:
                        int block_dim,
                        double weight = 1.0);
 
-  std::string name() const override { return name_; }
+  std::string name() const { return name_; }
 
   void setWeight(double w);
   void setReference(const Eigen::VectorXd& ref);   // fixed ref

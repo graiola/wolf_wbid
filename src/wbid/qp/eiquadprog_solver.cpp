@@ -4,7 +4,7 @@
 #include <stdexcept>
 
 // Your solver is in namespace Eigen and provides solve_quadprog(MatrixXd&, VectorXd&, ...)
-#include <eigen_quadsolve.hpp>   // <-- put here the real header name you showed
+#include <eiquadprog.hpp>   // <-- put here the real header name you showed
 
 namespace wolf_wbid {
 

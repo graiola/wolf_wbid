@@ -182,6 +182,12 @@ public:
   */
   bool getPose(const Eigen::VectorXd& q, const std::string& source_frame, Eigen::Affine3d& pose);
 
+
+    /**
+  * @brief TODO
+  */
+  bool getRelativeJacobian(const Eigen::VectorXd& q, const std::string& target_link_name, const std::string& base_link_name, Eigen::MatrixXd& J);
+
   /**
   * @brief Computes the twist of the source_frame w.r.t. the world frame
   *
@@ -192,6 +198,18 @@ public:
   * @return True if source_frame is valid. False otherwise.
   */
   bool getTwist(const Eigen::VectorXd& q, const Eigen::VectorXd& qd, const std::string& source_frame, Eigen::Vector6d& twist);
+
+ /**
+  * @brief Computes the twist of the distal frame w.r.t. the base frame 
+  *
+  * @param q The joint positions.
+  * @param qd The joint velocities.
+  * @param distal The distal link name.
+  * @param base The base link name
+  * @param twist_rel the calculated relative twist
+  * @return True if source_frame is valid. False otherwise.
+  */
+  bool getTwist(const Eigen::VectorXd& q, const Eigen::VectorXd& qd, const std::string& distal, const std::string& base, Eigen::Vector6d& twist_rel);
 
   /**
    * @brief Gets the Jacobian of link_name expressed in the world frame, i.e a matrix such that its product with
@@ -324,6 +342,7 @@ private:
   Eigen::Vector3d tmp_vector3d_;
   Eigen::Affine3d tmp_affine3d_;
   Eigen::Affine3d tmp_affine3d_1_;
+  mutable KDL::Vector   tmp_kdl_vector_;
   mutable KDL::Jacobian tmp_kdl_jacobian_;
   mutable KDL::Rotation tmp_kdl_rotation_;
 

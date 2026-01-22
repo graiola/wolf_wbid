@@ -23,7 +23,7 @@ FrictionConeConstraint::FrictionConeConstraint(const std::string& contact_name,
 
   resizeLinear(5, vars_.size());
   // inequality: A x <= 0  => lA = -inf, uA = 0
-  lA_ = minusInfVec(5);
+  lA_.setConstant(5, -kInf);
   uA_.setZero(5);
 
   computeCi();

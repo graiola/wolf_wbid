@@ -21,6 +21,33 @@ using namespace wolf_controller_utils;
 
 namespace wolf_wbid {
 
+static inline Eigen::Matrix3d skew(const Eigen::Vector3d& v)
+{
+  Eigen::Matrix3d S;
+  S <<     0.0, -v.z(),  v.y(),
+        v.z(),     0.0, -v.x(),
+       -v.y(),  v.x(),    0.0;
+  return S;
+}
+
+/**
+ * @brief Adjoint of T = (R, p): maps twist from frame A to frame B.
+ * If T = B_T_A, then:  V_B = Ad(T) * V_A, with twists stacked as [v; w].
+ */
+static inline Eigen::Matrix<double,6,6> adjointFromTransform(const Eigen::Affine3d& T_BA)
+{
+  Eigen::Matrix<double,6,6> Ad; Ad.setZero();
+  const Eigen::Matrix3d R = T_BA.linear();
+  const Eigen::Vector3d p = T_BA.translation();
+
+  Ad.topLeftCorner<3,3>()     = R;
+  Ad.bottomRightCorner<3,3>() = R;
+
+  // For [v; w] convention: v_B = R v_A + [p]_x R w_A,  w_B = R w_A
+  Ad.topRightCorner<3,3>() = skew(p) * R;
+  return Ad;
+}
+
 QuadrupedRobot::QuadrupedRobot(const std::string& robot_name, const std::string& urdf, const std::string& srdf)
   :ModelInterfaceRBDL()
 {
@@ -220,6 +247,56 @@ QuadrupedRobot::QuadrupedRobot(const std::string& robot_name, const std::string&
   stand_down_height_ =  -stand_down_height_/N_LEGS;
 }
 
+bool QuadrupedRobot::getRelativeJacobian(const Eigen::VectorXd& q,
+                                         const std::string& target_link_name,
+                                         const std::string& base_link_name,
+                                         Eigen::MatrixXd& J)
+{
+    // Following XBot::ModelInterface::getRelativeJacobian()
+
+    // 1) Compute base and target jacobians in WORLD frame (expressed in world)
+    Eigen::MatrixXd J_base_w, J_target_w;
+    if(!getJacobian(q, base_link_name, J_base_w))   return false;
+    if(!getJacobian(q, target_link_name, J_target_w)) return false;
+
+    // 2) Compute world_R_base (orientation of base wrt world)
+    Eigen::Affine3d w_T_base, w_T_target;
+    if(!getPose(q, base_link_name, w_T_base))     return false;   // world_T_base
+    if(!getPose(q, target_link_name, w_T_target)) return false;   // world_T_target
+
+    const Eigen::Matrix3d w_R_base = w_T_base.linear();
+
+    // 3) Compute world origins
+    const Eigen::Vector3d w_p_base   = w_T_base.translation();
+    const Eigen::Vector3d w_p_target = w_T_target.translation();
+
+    // 4) Change ref point of base jacobian from origin(base) to origin(target)
+    // KDL: J.changeRefPoint(p_new - p_old) where vector is expressed in SAME base frame of jacobian
+    tmp_kdl_jacobian_.data = J_base_w;
+    tmp_kdl_vector_.x(w_p_target.x() - w_p_base.x());
+    tmp_kdl_vector_.y(w_p_target.y() - w_p_base.y());
+    tmp_kdl_vector_.z(w_p_target.z() - w_p_base.z());
+    tmp_kdl_jacobian_.changeRefPoint(tmp_kdl_vector_);
+    J_base_w = tmp_kdl_jacobian_.data;
+
+    // 5) Relative jacobian in WORLD frame
+    Eigen::MatrixXd J_rel_w = J_target_w - J_base_w;
+
+    // 6) Rotate to BASE frame (expressed in base)
+    tmp_kdl_jacobian_.data = J_rel_w;
+    // KDL changeBase expects a Rotation; we want base_R_world = (world_R_base)^T
+    tmp_kdl_rotation_ = KDL::Rotation(
+        w_R_base(0,0), w_R_base(0,1), w_R_base(0,2),
+        w_R_base(1,0), w_R_base(1,1), w_R_base(1,2),
+        w_R_base(2,0), w_R_base(2,1), w_R_base(2,2)
+    );
+    tmp_kdl_jacobian_.changeBase(tmp_kdl_rotation_.Inverse()); // base_R_world
+    J = tmp_kdl_jacobian_.data;
+
+    return true;
+}
+
+
 bool QuadrupedRobot::getTwist(const Eigen::VectorXd& q, const Eigen::VectorXd& qd, const std::string& source_frame, Eigen::Vector6d& twist)
 {
     int body_id = linkId(source_frame);
@@ -234,6 +311,43 @@ bool QuadrupedRobot::getTwist(const Eigen::VectorXd& q, const Eigen::VectorXd& q
 
     return true;
 }
+
+bool QuadrupedRobot::getTwist(const Eigen::VectorXd& q, const Eigen::VectorXd& qd, const std::string& distal, const std::string& base, Eigen::Vector6d& twist_rel)
+{
+  twist_rel.setZero();
+
+  if(distal == base) {
+    return true;
+  }
+
+  // dimension check opzionale (ma utile)
+  if(qd.size() != getJointNum()) {
+    // oppure accetta qd.size()==getJointNum()-6 se floating base ecc...
+    return false;
+  }
+
+  Eigen::MatrixXd J;
+
+  if(base == "world")
+  {
+    // Jacobian of distal expressed in world (target frame = world)
+    if(!getJacobian(q, distal, "world", J)) {
+      return false;
+    }
+  }
+  else
+  {
+    // Relative Jacobian of distal wrt base, expressed in base frame
+    if(!getRelativeJacobian(q, distal, base, J)) {
+      return false;
+    }
+  }
+
+  // twist_rel is expressed in base (or world if base=="world")
+  twist_rel.noalias() = J * qd;
+  return true;
+}
+
 
 bool QuadrupedRobot::getPose(const Eigen::VectorXd& q, const std::string& source_frame, Eigen::Affine3d& pose)
 {
