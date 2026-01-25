@@ -2,6 +2,8 @@
 
 #include <limits>
 #include <stdexcept>
+#include <algorithm>
+#include <cmath>
 
 // Your solver is in namespace Eigen and provides solve_quadprog(MatrixXd&, VectorXd&, ...)
 #include <eiquadprog.hpp>   // <-- put here the real header name you showed
@@ -10,14 +12,25 @@ namespace wolf_wbid {
 
 EiQuadProgSolver::EiQuadProgSolver()
 {
-  // default same spirit as OpenSoT: eps_regularisation * BASE_REGULARISATION
+  // Default: same spirit as legacy backend
+  // (base numerical regularisation)
   eps_reg_ = 1.0 * BASE_REGULARISATION;
 }
 
 void EiQuadProgSolver::setEpsRegularisation(double eps)
 {
-  if(eps < 0.0) throw std::runtime_error("EiQuadProgSolver: negative eps not allowed");
-  eps_reg_ = eps * BASE_REGULARISATION;
+  if(eps < 0.0) {
+    throw std::runtime_error("EiQuadProgSolver: negative eps not allowed");
+  }
+
+  // Keep the same "multiplier * BASE_REGULARISATION" convention,
+  // but avoid going below BASE_REGULARISATION if eps > 0.
+  // eps == 0 -> disable (numerically risky, but explicit).
+  if(eps == 0.0) {
+    eps_reg_ = 0.0;
+  } else {
+    eps_reg_ = std::max(BASE_REGULARISATION, eps * BASE_REGULARISATION);
+  }
 }
 
 static void appendCI(const Eigen::MatrixXd& CI_add, const Eigen::VectorXd& ci0_add,
@@ -69,16 +82,16 @@ QPSolution EiQuadProgSolver::solve(const QPProblem& qp)
     throw std::runtime_error("EiQuadProgSolver: A cols mismatch");
   }
 
-  // Copy because Eigen::solve_quadprog modifies G during Cholesky (per your header note)
+  // Copy because Eigen::solve_quadprog modifies G during Cholesky
   Eigen::MatrixXd H = qp.H;
   Eigen::VectorXd g = qp.g;
 
-  // Regularization on diagonal (OpenSoT behavior)
+  // Numerical diagonal regularisation (backend stability)
   if(eps_reg_ > 0.0){
     H.diagonal().array() += eps_reg_;
   }
 
-  // No equalities for now (same as OpenSoT backend you showed)
+  // No equalities for now
   Eigen::MatrixXd CE; CE.resize(n, 0);
   Eigen::VectorXd ce0; ce0.resize(0);
 
@@ -114,9 +127,11 @@ QPSolution EiQuadProgSolver::solve(const QPProblem& qp)
   const double inf = std::numeric_limits<double>::infinity();
   double obj = inf;
 
-  // IMPORTANT: your signature is:
-  //   Eigen::solve_quadprog(MatrixXd& G, VectorXd& g0, const MatrixXd& CE, const VectorXd& ce0,
-  //                         const MatrixXd& CI, const VectorXd& ci0, VectorXd& x)
+  // Signature:
+  //   Eigen::solve_quadprog(MatrixXd& G, VectorXd& g0,
+  //                         const MatrixXd& CE, const VectorXd& ce0,
+  //                         const MatrixXd& CI, const VectorXd& ci0,
+  //                         VectorXd& x)
   obj = Eigen::solve_quadprog(H, g, CE, ce0, CI, ci0, sol.x);
 
   if(obj == inf || !std::isfinite(obj)){
@@ -133,4 +148,3 @@ QPSolution EiQuadProgSolver::solve(const QPProblem& qp)
 }
 
 } // namespace wolf_wbid
-

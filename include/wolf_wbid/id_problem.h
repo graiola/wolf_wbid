@@ -36,6 +36,7 @@
 #include <wolf_wbid/wbid/constraints/torque_limits_constraint.h>
 #include <wolf_wbid/wbid/constraints/dynamics_equality_constraint.h>
 #include <wolf_wbid/wbid/constraints/base_accel_z_constraint.h>
+#include <wolf_wbid/wbid/constraints/floating_base_accel_constraint.h>
 #include <wolf_wbid/task_interface.h>
 
 namespace wolf_wbid {
@@ -188,6 +189,7 @@ private:
   std::shared_ptr<TorqueLimitsConstraint> torque_limits_;
   std::shared_ptr<DynamicsEqualityConstraint> dynamics_eq_;
   std::shared_ptr<BaseAccelZConstraint> base_accel_z_;
+  std::shared_ptr<FloatingBaseAccelConstraint> base_accel_fb_;
 
   // qp + solver
   QPProblem qp_;

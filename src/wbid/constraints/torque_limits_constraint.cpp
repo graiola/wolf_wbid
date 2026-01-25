@@ -58,7 +58,7 @@ void TorqueLimitsConstraint::setTorqueLimits(const Eigen::VectorXd& tau_lim)
   tau_lim_ = tau_lim;
 }
 
-void TorqueLimitsConstraint::update(const Eigen::VectorXd& /*x*/)
+/*void TorqueLimitsConstraint::update(const Eigen::VectorXd& x)
 {
   // Get inertia and nonlinear term
   robot_.getInertiaMatrix(B_);
@@ -113,7 +113,53 @@ void TorqueLimitsConstraint::update(const Eigen::VectorXd& /*x*/)
   // equivalently: -tau_lim - h <= A*x <= tau_lim - h
   lA_ = (-tau_lim_ - h_);
   uA_ = ( tau_lim_ - h_);
+}*/
+
+void TorqueLimitsConstraint::update(const Eigen::VectorXd&)
+{
+  robot_.getInertiaMatrix(B_);
+  robot_.computeNonlinearTerm(h_);
+
+  const int ndofs = robot_.getJointNum();
+  const int fb = robot_.isFloatingBase() ? 6 : 0;
+  const int na = ndofs - fb;
+
+  // vincolo solo sugli attuati
+  resizeLinear(na, vars_.size());
+  A_.setZero();
+
+  const auto& qb = vars_.qddotBlock();
+  A_.block(0, qb.offset + fb, na, na) = B_.block(fb, fb, na, na);
+
+  for(size_t i = 0; i < contacts_.size(); ++i)
+  {
+    if(!enabled_[i]) continue;
+    const std::string& c = contacts_[i];
+    if(!vars_.hasContact(c)) continue;
+
+    robot_.getJacobian(c, Jtmp_);
+
+    const auto& cb = vars_.contactBlock(c);
+
+    if(vars_.contactDim() == 3)
+    {
+      // usa solo parte lineare, e solo righe attuate
+      A_.block(0, cb.offset, na, 3).noalias() += -Jtmp_.topRows(3).transpose().block(fb, 0, na, 3);
+    }
+    else
+    {
+      A_.block(0, cb.offset, na, 6).noalias() += -Jtmp_.transpose().block(fb, 0, na, 6);
+    }
+  }
+
+  // bounds su tau attuati
+  const Eigen::VectorXd tau_lim_a = tau_lim_.tail(na);
+  const Eigen::VectorXd h_a       = h_.tail(na);
+
+  lA_ = (-tau_lim_a - h_a);
+  uA_ = ( tau_lim_a - h_a);
 }
+
 
 } // namespace wolf_wbid
 

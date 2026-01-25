@@ -56,7 +56,7 @@ bool DynamicsEqualityConstraint::disableContact(const std::string& contact_link)
   return true;
 }
 
-void DynamicsEqualityConstraint::update(const Eigen::VectorXd& x)
+/*void DynamicsEqualityConstraint::update(const Eigen::VectorXd& x)
 {
   // 1) get B(q), h(q,qd)
   robot_.getInertiaMatrix(B_);
@@ -119,7 +119,52 @@ void DynamicsEqualityConstraint::update(const Eigen::VectorXd& x)
   // b = -hu
   lA_ = -hu_;
   uA_ = -hu_;
+}*/
+
+void DynamicsEqualityConstraint::update(const Eigen::VectorXd& /*x*/)
+{
+  robot_.getInertiaMatrix(B_);
+  robot_.computeNonlinearTerm(h_);
+
+  if(B_.rows() < 6 || B_.cols() < 6 || h_.size() < 6)
+    throw std::runtime_error("DynamicsEqualityConstraint: robot model seems not floating-base");
+
+  // Base rows of full dynamics
+  Bu_ = B_.topRows(6);
+  hu_ = h_.head(6);
+
+  A_.setZero();
+
+  const auto& qb = vars_.qddotBlock();
+  A_.block(0, qb.offset, 6, qb.dim) = Bu_;
+
+  // For POINT_CONTACT we want: -(J_lin_base^T) * f
+  // with J ordering [v;w] => linear is topRows(3)
+  // base columns are the first 6 columns.
+  for(size_t i = 0; i < contacts_.size(); ++i)
+  {
+    if(!enabled_[i]) continue;
+
+    const std::string& c = contacts_[i];
+    if(!vars_.hasContact(c)) continue;
+
+    robot_.getJacobian(c, Jtmp_); // 6 x ndofs
+
+    if(Jtmp_.rows() < 6 || Jtmp_.cols() < 6)
+      throw std::runtime_error("DynamicsEqualityConstraint: bad Jacobian size for " + c);
+
+    const auto& cb = vars_.contactBlock(c); // dim=3
+
+    // J_lin_base is 3x6 => transpose is 6x3
+    A_.block(0, cb.offset, 6, 3).noalias() +=
+        -Jtmp_.topRows(3).leftCols(6).transpose();
+  }
+
+  // Equality: A*x = -hu
+  lA_ = -hu_;
+  uA_ = -hu_;
 }
+
 
 
 } // namespace wolf_wbid
