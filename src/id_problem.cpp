@@ -70,6 +70,42 @@ static inline void applyBlockRegularization(Eigen::MatrixXd& H,
   }
 }
 
+// ----------------------------------------------------------------------------
+// OpenSoT-compat weights patch:
+// - if W is (almost) diagonal, square the diagonal -> W_eff = diag(w)^2
+// - else keep W unchanged (non-diagonal weights are rare; squaring them changes semantics)
+// ----------------------------------------------------------------------------
+static inline bool isAlmostDiagonal(const Eigen::MatrixXd& W, double tol = 1e-12)
+{
+  if(W.rows() != W.cols()) return false;
+  const int n = W.rows();
+  for(int i=0;i<n;++i){
+    for(int j=0;j<n;++j){
+      if(i==j) continue;
+      if(std::abs(W(i,j)) > tol) return false;
+    }
+  }
+  return true;
+}
+
+static inline Eigen::MatrixXd makeWeightCompat_OpenSoT(const Eigen::MatrixXd& W)
+{
+  if(W.size() == 0) return W;
+
+  // Typical tasks use diagonal weights
+  if(isAlmostDiagonal(W)) {
+    Eigen::MatrixXd We = W;
+    We.diagonal().array() = We.diagonal().array().square();
+    return We;
+  }
+
+  // Non-diagonal: keep as-is (safe)
+  // If you *really* want to force squaring, tell me and we can do:
+  //   - We = W * W  (matrix product)  OR
+  //   - We = W.cwiseProduct(W) (element-wise)
+  return W;
+}
+
 IDProblem::IDProblem(QuadrupedRobot::Ptr model)
 : model_(std::move(model))
 , control_mode_(WPG)
@@ -249,7 +285,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     constraints_.push_back(cb);
   }
 
-  // torque limits (currently disabled, as in your new code)
+  // torque limits
   {
     Eigen::VectorXd tau_max;
     model_->getEffortLimits(tau_max);
@@ -261,24 +297,13 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
       "torque_limits",
       *model_,
       *vars_,
-      foot_names_,     // <-- GIUSTO
+      foot_names_,
       tau_max
     );
     constraints_.push_back(torque_limits_);
   }
 
-  // dynamics equality constraint
-  dynamics_eq_ = std::make_shared<DynamicsEqualityConstraint>(
-    "dynamics_equality",
-    *model_,
-    *vars_,
-    foot_names_
-  );
-  dynamics_eq_->setEnabled(true);
-  constraints_.push_back(dynamics_eq_);
-
   // --- hard constraint: prevent "falling solution" (qddot_base_z = 0)
-  // NOTE: make sure this is pushed ONCE.
   //base_accel_z_ = std::make_shared<BaseAccelZConstraint>(
   //  "base_accel_z",
   //  *vars_,
@@ -287,6 +312,20 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   //);
   //base_accel_z_->setEnabled(true);
   //constraints_.push_back(base_accel_z_);
+
+  // --- floating base accel constraint (coerente con base_accel_z)
+  // Consiglio per stand-up: blocca tutto tranne z:
+  //   x,y,roll,pitch,yaw = 0
+  // (z lo gestisce base_accel_z_)
+  //base_accel_fb_ = std::make_shared<FloatingBaseAccelConstraint>(
+  //  "base_accel_fb",
+  //  *vars_,
+  //  /*base_indices=*/std::vector<int>{2, 3, 4},
+  //  FloatingBaseAccelConstraint::Mode::EQUALITY,
+  //  /*eps=*/0.5
+  //);
+  //base_accel_fb_->setEnabled(true);
+  //constraints_.push_back(base_accel_fb_);
 
   // solver
   solver_ = CreateDefaultSolver();
@@ -300,7 +339,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   // replicate old behavior: start in WPG (no external refs)
   control_mode_ = WPG;
   change_control_mode_ = true;
-  update();                 // will run the mode switch init below
+  update();
   change_control_mode_ = false;
 
   initialized_ = true;
@@ -308,7 +347,6 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
 
 void IDProblem::setControlMode(mode_t mode)
 {
-  // only two modes supported: WPG and EXT (ignore others if present in enum)
   if(mode != WPG && mode != EXT) return;
 
   if(control_mode_ != mode) {
@@ -360,7 +398,6 @@ const Com::Ptr& IDProblem::getComTask() const { return com_; }
 
 void IDProblem::activateExternalReferences(bool activate)
 {
-  // NOTE: as in old code, arms are external by design; we keep their flag untouched
   for(const auto& fn : foot_names_)     feet_[fn]->OPTIONS.set_ext_reference = activate;
   for(const auto& fn : foot_names_)     wrenches_[fn]->OPTIONS.set_ext_reference = activate;
   waist_->OPTIONS.set_ext_reference = activate;
@@ -389,7 +426,7 @@ void IDProblem::setFootReference(const std::string& foot_name,
     return;
   }
   if(reference_frame == WORLD_FRAME_NAME) {
-    tmp_affine3d_ = model_->getBasePoseInWorld().inverse(); // base_T_world
+    tmp_affine3d_ = model_->getBasePoseInWorld().inverse();
     tmp_vector6d_.setZero();
     tmp_vector6d_.head<3>() = tmp_affine3d_.linear() * vel_ref.head<3>();
     tmp_affine3d_ = tmp_affine3d_ * pose_ref;
@@ -468,7 +505,7 @@ void IDProblem::update()
     {
       friction_cones_.at(fn)->setContactRotation(fc_R_);
       friction_cones_.at(fn)->setMu(mu_);
-      friction_cones_.at(fn)->setEnabled(contact_enabled_[fn]); // optional: disable on swing
+      friction_cones_.at(fn)->setEnabled(contact_enabled_[fn]);
     }
 
     if(force_bounds_.count(fn))
@@ -477,14 +514,12 @@ void IDProblem::update()
       Eigen::Vector3d fmax = wrench_upper_lims_.head<3>();
       force_bounds_.at(fn)->setMin(fmin);
       force_bounds_.at(fn)->setMax(fmax);
-      force_bounds_.at(fn)->releaseContact(!contact_enabled_[fn]); // release on swing
+      force_bounds_.at(fn)->releaseContact(!contact_enabled_[fn]);
       force_bounds_.at(fn)->setEnabled(true);
     }
   }
 
-  // -----------------------------------------------------------------------
   // Mode switch logic
-  // -----------------------------------------------------------------------
   if(change_control_mode_)
   {
     if(control_mode_ == EXT)
@@ -553,8 +588,11 @@ void IDProblem::addLeastSquaresTerm(QPProblem& qp,
                                    const Eigen::VectorXd& b,
                                    const Eigen::MatrixXd& W)
 {
-  qp.H.noalias() += A.transpose() * W * A;
-  qp.g.noalias() += -A.transpose() * W * b;
+  // OpenSoT-compat: square diagonal weights
+  const Eigen::MatrixXd We = makeWeightCompat_OpenSoT(W);
+
+  qp.H.noalias() += A.transpose() * We * A;
+  qp.g.noalias() += -A.transpose() * We * b;
 }
 
 void IDProblem::addLeastSquaresRows(QPProblem& qp,
@@ -649,15 +687,9 @@ bool IDProblem::buildQP(QPProblem& qp)
   qp.H.setZero();
   qp.g.setZero();
 
-  // -----------------------------------------------------------------------
-  // Regularization (block-based):
-  //  - qddot block += eps
-  //  - contact blocks += eps^2
-  // -----------------------------------------------------------------------
+  // Regularization
   applyBlockRegularization(qp.H, *vars_, foot_names_, regularization_value_);
-  
 
-  // block diagonal minimization weights (optional)
   if(min_qddot_weight_ > 0.0)
   {
     const auto& b = vars_->qddotBlock();
@@ -674,14 +706,12 @@ bool IDProblem::buildQP(QPProblem& qp)
   }
 
   // --- tasks -> LS
-  // feet XYZ only
   for(const auto& fn : foot_names_)
   {
     const auto& t = *feet_.at(fn);
     addLeastSquaresRows(qp, t.A(), t.b(), t.W(), {0,1,2});
   }
 
-  // arms full 6D
   for(const auto& ee : ee_names_)
   {
     const auto& t = *arms_.at(ee);
@@ -698,7 +728,7 @@ bool IDProblem::buildQP(QPProblem& qp)
       addLeastSquaresRows(qp, c.A(), c.b(), c.W(), rowsXYZ());
     } else {
       auto wzrpy = rowsRPY();
-      wzrpy.insert(wzrpy.begin(), 2); // Z + RPY -> {2,3,4,5}
+      wzrpy.insert(wzrpy.begin(), 2);
       addLeastSquaresRows(qp, w.A(), w.b(), w.W(), wzrpy);
       addLeastSquaresRows(qp, c.A(), c.b(), c.W(), rowsXY());
     }
@@ -710,23 +740,17 @@ bool IDProblem::buildQP(QPProblem& qp)
     addLeastSquaresTerm(qp, t.A(), t.b(), t.W());
   }
 
-  //if(activate_postural_)
-  //{
-  //  const auto& t = *postural_;
-  //  addLeastSquaresRows(qp, t.A(), t.b(), t.W(), rowsLimbs(t.b().size()));
-  //}
+  // if(activate_postural_) { ... }
 
   // --- constraints update + merge
   for(const auto& c : constraints_)
   {
     if(!c) continue;
     if(!c->enabled()) continue;
-    c->update(x_); // can ignore x internally; safe to call
+    c->update(x_);
   }
 
   applyConstraintContributions(qp, constraints_);
-
-  // NOTE: joint position limits not yet implemented here (activate_joint_position_limits_)
 
   return true;
 }
@@ -777,7 +801,6 @@ bool IDProblem::solve(Eigen::VectorXd& tau)
 
   bool torque_ok = computeTauFromSolution(x_, tau);
 
-  // debug dump completo (x + tau + wrenches aggiornati)
   debugDumpSolveStep(&qp_, &x_, &tau, true, true, torque_ok);
 
   return torque_ok;
@@ -1036,6 +1059,63 @@ void IDProblem::debugDumpSolveStep(const QPProblem* qp,
       for(const auto& kv : arms_) print_task("arm:" + kv.first, *kv.second);
       print_task("waist", *waist_);
       print_task("com", *com_);
+
+      // -------------------- EXTRA COM DEBUG (model-side + task-side) --------------------
+      try {
+        Eigen::Vector3d com_p, com_v, jdotqdot;
+        Eigen::MatrixXd Jcom;
+
+        model_->getCOM(com_p);
+        model_->getCOMVelocity(com_v);
+        model_->getCOMJacobian(Jcom, jdotqdot); // Jcom: 3 x ndof (o joint num del model)
+
+        std::cout << "[DBG]   [COM_DBG] model COM pos   = " << com_p.transpose() << "\n";
+        std::cout << "[DBG]   [COM_DBG] model COM vel   = " << com_v.transpose() << "\n";
+        std::cout << "[DBG]   [COM_DBG] model dJcomQdot = " << jdotqdot.transpose() << "\n";
+
+        // Some quick stats on Jcom
+        if(Jcom.size() > 0) {
+          std::cout << "[DBG]   [COM_DBG] Jcom rows=" << Jcom.rows()
+                    << " cols=" << Jcom.cols()
+                    << " fro_norm=" << Jcom.norm()
+                    << "\n";
+        } else {
+          std::cout << "[DBG]   [COM_DBG] Jcom: <empty>\n";
+        }
+
+        // Task-side: infer "desired accel" y = b + dJcomQdot (since your task builds b = y - dJdq)
+        {
+          const Eigen::Vector3d b_task = com_->b();  // should be size 3
+          std::cout << "[DBG]   [COM_DBG] task b         = " << b_task.transpose() << "\n";
+          std::cout << "[DBG]   [COM_DBG] y_est (=b+dJq) = " << (b_task + jdotqdot).transpose() << "\n";
+        }
+
+        // If solution x is available, compute actual com acceleration implied by solution:
+        if(x && x->size() == vars_->size()) {
+          const Eigen::VectorXd qdd = vars_->qddot(*x);
+
+          // Protect against dimension mismatch between Jcom and qdd
+          if(Jcom.cols() == qdd.size()) {
+            Eigen::Vector3d com_acc = Jcom * qdd + jdotqdot;
+            std::cout << "[DBG]   [COM_DBG] com_acc (J*qdd + dJq) = "
+                      << com_acc.transpose() << "\n";
+          } else {
+            std::cout << "[DBG]   [COM_DBG] cannot compute com_acc: Jcom.cols("
+                      << Jcom.cols() << ") != qdd.size(" << qdd.size() << ")\n";
+          }
+
+          // Also print base part of qddot just for correlation
+          if(qdd.size() >= 6) {
+            std::cout << "[DBG]   [COM_DBG] qddot_base (from x) = "
+                      << qdd.head<6>().transpose() << "\n";
+          }
+        }
+
+      } catch(...) {
+        std::cout << "[DBG]   [COM_DBG] (note) failed to compute model-side COM debug\n";
+      }
+      // ---------------------------------------------------------------------------------
+
       print_task("postural", *postural_);
       print_task("angular_momentum", *angular_momentum_);
     }

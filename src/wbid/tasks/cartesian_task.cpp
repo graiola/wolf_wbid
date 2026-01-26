@@ -1,12 +1,24 @@
+// ============================================================================
+// File: src/wbid/tasks/cartesian_task.cpp
+// CartesianTask: OpenSoT-like behavior using ONLY ModelInterface Eigen APIs
+// ============================================================================
+
 #include <wolf_wbid/wbid/tasks/cartesian_task.h>
+
 #include <wolf_wbid/wbid/id_variables.h>
 #include <wolf_wbid/quadruped_robot.h>
 
+#include <Eigen/Dense>
 #include <cmath>
 #include <stdexcept>
 
 namespace wolf_wbid {
 
+static constexpr const char* kWorldName = "world";
+
+// -----------------------------
+// Constructor
+// -----------------------------
 CartesianTask::CartesianTask(const std::string& task_id,
                              QuadrupedRobot& robot,
                              const std::string& distal_link,
@@ -19,17 +31,42 @@ CartesianTask::CartesianTask(const std::string& task_id,
 , distal_link_(distal_link)
 {
   const int n = robot_.getJointNum();
+
   Bi_.resize(n, n);
   tmp6xn_.resize(6, n);
 
-  // A is 6 x dim(x)
   A_.setZero(6, vars_.size());
   b_.setZero(6);
 
   q_.setZero(n);
   qd_.setZero(n);
 
-  // reset ref to current
+  // OpenSoT-ish defaults
+  orientation_gain_ = 1.0;
+  gain_type_ = GainType::Acceleration;
+
+  lambda1_ = 100.0;
+  lambda2_ = 2.0 * std::sqrt(lambda1_);
+
+  Kp_.setIdentity();
+  Kd_.setIdentity();
+
+  vel_ref_.setZero();
+  acc_ref_.setZero();
+  virtual_force_ref_.setZero();
+
+  vel_ref_cached_ = vel_ref_;
+  acc_ref_cached_ = acc_ref_;
+  virtual_force_ref_cached_ = virtual_force_ref_;
+
+  pose_current_.setIdentity();
+  pose_ref_.setIdentity();
+
+  pose_error_.setZero();
+  vel_error_.setZero();
+  vel_current_.setZero();
+  jdotqdot_.setZero();
+
   resetReference();
 }
 
@@ -64,23 +101,14 @@ bool CartesianTask::setBaseLink(const std::string& base_link)
 {
   if(base_link == base_link_) return true;
 
-  // Need current state to remap reference as OpenSoT does
-  if(!readRobotState()) return false;
-
-  // OpenSoT logic:
-  // pose_ref is currently expressed in old base.
-  // We want the same physical target expressed in new base:
-  // newBase_T_distal_ref = (newBase_T_oldBase) * (oldBase_T_distal_ref)
+  // Keep reference consistent when changing base
   Eigen::Affine3d oldBase_T_newBase = Eigen::Affine3d::Identity();
-  if(!robot_.getPose(q_, base_link_, base_link, oldBase_T_newBase))
-  {
-    // if links invalid this will fail
+
+  // Use MODEL (not q-explicit) to get pose between frames, like OpenSoT would
+  if(!robot_.getPose(base_link_, base_link, oldBase_T_newBase))
     return false;
-  }
 
-  const Eigen::Affine3d newBase_T_oldBase = oldBase_T_newBase.inverse();
-  pose_ref_ = newBase_T_oldBase * pose_ref_;
-
+  pose_ref_ = oldBase_T_newBase * pose_ref_;
   base_link_ = base_link;
   return true;
 }
@@ -88,7 +116,7 @@ bool CartesianTask::setBaseLink(const std::string& base_link)
 bool CartesianTask::setDistalLink(const std::string& distal_link)
 {
   if(distal_link == distal_link_) return true;
-  if(distal_link == "world") return false;
+  if(distal_link == kWorldName) return false;
 
   distal_link_ = distal_link;
   resetReference();
@@ -144,17 +172,18 @@ void CartesianTask::getReference(Eigen::Affine3d& pose_ref,
 
 void CartesianTask::resetReference()
 {
-  if(!readRobotState())
-  {
-    pose_ref_.setIdentity();
-    return;
-  }
-
+  // reference = current pose (OpenSoT behavior)
   Eigen::Affine3d pose = Eigen::Affine3d::Identity();
-  if(!robot_.getPose(q_, distal_link_, base_link_, pose))
+
+  if(base_link_ == kWorldName)
   {
-    // keep safe default
-    pose.setIdentity();
+    if(!robot_.getPose(distal_link_, pose))
+      pose.setIdentity();
+  }
+  else
+  {
+    if(!robot_.getPose(distal_link_, base_link_, pose))
+      pose.setIdentity();
   }
 
   pose_ref_ = pose;
@@ -174,7 +203,7 @@ bool CartesianTask::reset()
   return true;
 }
 
-// small-angle SO(3) orientation error (OpenSoT uses XBot::Utils::computeOrientationError)
+// small-angle orientation error (OpenSoT-style)
 void CartesianTask::computeOrientationError(const Eigen::Matrix3d& R_des,
                                             const Eigen::Matrix3d& R_act,
                                             Eigen::Vector3d& e) const
@@ -189,37 +218,67 @@ void CartesianTask::computeOrientationError(const Eigen::Matrix3d& R_des,
 
 void CartesianTask::computeCartesianInertiaInverse()
 {
-  // Mi = (J * B^{-1} * J^T)
   robot_.getInertiaInverse(Bi_);
   tmp6xn_.noalias() = J_ * Bi_;
   Mi_.noalias()     = tmp6xn_ * J_.transpose();
 }
 
+// -----------------------------
+// UPDATE (core)
+// -----------------------------
 void CartesianTask::update(const Eigen::VectorXd& x)
 {
+  // cache refs (OpenSoT behavior)
   vel_ref_cached_ = vel_ref_;
   acc_ref_cached_ = acc_ref_;
   virtual_force_ref_cached_ = virtual_force_ref_;
 
-  const auto qddot = vars_.qddot(x); // Map
-
-  // Read robot state once (new interfaces: getters require output arg)
+  // ensure internal state is readable (q, qd not used for kinematics here)
   if(!readRobotState())
-    throw std::runtime_error("CartesianTask::update(): failed to read robot joint state");
+    throw std::runtime_error("CartesianTask::update(): failed to read joint state");
 
-  // --- Kinematics in base_link frame (OpenSoT behavior) ---
-  if(!robot_.getJacobian(q_, distal_link_, base_link_, J_))
-    throw std::runtime_error("CartesianTask::update(): getJacobian(q, distal, base) failed");
+  // IMPORTANT: we rely on the model internal state (already updated in the control loop).
+  // If you suspect update() is not called elsewhere, uncomment this:
+  // robot_.update(true, true, true);
 
-  if(!robot_.getPose(q_, distal_link_, base_link_, pose_current_))
-    throw std::runtime_error("CartesianTask::update(): getPose(q, distal, base) failed");
+  // ------------------------------------------------------------
+  // Kinematics/Differential kinematics ONLY via ModelInterface Eigen overloads
+  // ------------------------------------------------------------
+  const Eigen::Vector3d p_ref = Eigen::Vector3d::Zero();
 
-  if(!robot_.getTwist(q_, qd_, distal_link_, base_link_, vel_current_))
-    vel_current_.setZero();
+  if(base_link_ == kWorldName)
+  {
+    if(!robot_.getPose(distal_link_, pose_current_))
+      throw std::runtime_error("CartesianTask::update(): getPose(distal, world) failed");
 
-  // TODO: when available implement relative JdotQdot like OpenSoT computeRelativeJdotQdot
-  jdotqdot_.setZero();
+    if(!robot_.getJacobian(distal_link_, J_))
+      throw std::runtime_error("CartesianTask::update(): getJacobian(distal, world) failed");
 
+    if(!robot_.getVelocityTwist(distal_link_, vel_current_))
+      vel_current_.setZero();
+
+    if(!robot_.computeJdotQdot(distal_link_, p_ref, jdotqdot_))
+      jdotqdot_.setZero();
+  }
+  else
+  {
+    if(!robot_.getPose(distal_link_, base_link_, pose_current_))
+      throw std::runtime_error("CartesianTask::update(): getPose(distal, base) failed");
+
+    // expressed in base frame (this is what OpenSoT expects for relative tasks)
+    if(!robot_.getJacobian(distal_link_, base_link_, J_))
+      throw std::runtime_error("CartesianTask::update(): getJacobian(distal in base) failed");
+
+    if(!robot_.getVelocityTwist(distal_link_, base_link_, vel_current_))
+      vel_current_.setZero();
+
+    if(!robot_.computeRelativeJdotQdot(distal_link_, base_link_, jdotqdot_))
+      jdotqdot_.setZero();
+  }
+
+  // ------------------------------------------------------------
+  // Errors + tracking law (OpenSoT-like)
+  // ------------------------------------------------------------
   computeOrientationError(pose_ref_.linear(), pose_current_.linear(), orientation_error_);
 
   pose_error_.head<3>() = pose_ref_.translation() - pose_current_.translation();
@@ -243,15 +302,16 @@ void CartesianTask::update(const Eigen::VectorXd& x)
         + Mi_ * virtual_force_ref_;
   }
 
-  // A picks qddot block
+  // ------------------------------------------------------------
+  // Constraint: J*qddot = y - Jdot*qdot
+  // ------------------------------------------------------------
   A_.setZero();
   const auto& qb = vars_.qddotBlock();
   A_.block(0, qb.offset, 6, qb.dim) = J_;
 
-  // OpenSoT style: A = J*qddot + jdotqdot - y  =>  A x = b with b = y - jdotqdot
   b_ = y - jdotqdot_;
 
-  // consume refs (OpenSoT behavior)
+  // OpenSoT: one-shot feedforward reset
   vel_ref_.setZero();
   acc_ref_.setZero();
   virtual_force_ref_.setZero();

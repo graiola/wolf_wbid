@@ -21,6 +21,11 @@ ComTask::ComTask(const std::string& task_id,
   A_.setZero(3, vars_.size());
   b_.setZero(3);
 
+  lambda1_ = 100.0;
+  lambda2_ = 2.0*std::sqrt(lambda1_);
+  Kp_.setIdentity();
+  Kd_.setIdentity();
+
   // Initialize ref from current state
   resetReference();
 }

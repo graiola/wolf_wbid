@@ -84,6 +84,9 @@ public:
   using ModelInterface::getCOMJacobian;
   using ModelInterface::getJacobian;
   using ModelInterface::getCentroidalMomentumMatrix;
+  using ModelInterface::getVelocityTwist;
+  using ModelInterface::computeRelativeJdotQdot;
+  using ModelInterface::computeJdotQdot;
 
   const std::map<std::string, Eigen::Vector3d>& getFeetPositionInWorld() const;
   const std::map<std::string, Eigen::Vector3d>& getFeetPositionInBase() const;
