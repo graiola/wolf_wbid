@@ -586,43 +586,45 @@ void IDProblem::setDefaultBounds(QPProblem& qp)
 void IDProblem::addLeastSquaresTerm(QPProblem& qp,
                                    const Eigen::MatrixXd& A,
                                    const Eigen::VectorXd& b,
-                                   const Eigen::MatrixXd& W)
+                                   const Eigen::MatrixXd& W)   // sqrt-weight
 {
-  // OpenSoT-compat: square diagonal weights
-  const Eigen::MatrixXd We = makeWeightCompat_OpenSoT(W);
+  // OpenSoT semantics: minimize || W(Ax - b) ||^2
+  // => H += Aᵀ WᵀW A, g += -Aᵀ WᵀW b
+  const Eigen::MatrixXd We = W.transpose() * W;
 
   qp.H.noalias() += A.transpose() * We * A;
   qp.g.noalias() += -A.transpose() * We * b;
 }
 
+
 void IDProblem::addLeastSquaresRows(QPProblem& qp,
                                    const Eigen::MatrixXd& A,
                                    const Eigen::VectorXd& b,
-                                   const Eigen::MatrixXd& W,
+                                   const Eigen::MatrixXd& W,            // sqrt-weight
                                    const std::vector<int>& rows)
 {
-  const int r = static_cast<int>(rows.size());
+  const int r = (int)rows.size();
   if(r <= 0) return;
+
+  const Eigen::MatrixXd We_full = W.transpose() * W;
 
   Eigen::MatrixXd Ar(r, A.cols());
   Eigen::VectorXd br(r);
   Eigen::MatrixXd Wr(r, r);
-  Ar.setZero();
-  br.setZero();
-  Wr.setZero();
 
-  for(int i = 0; i < r; ++i)
-  {
+  for(int i=0;i<r;++i){
     const int ri = rows[i];
     Ar.row(i) = A.row(ri);
     br(i) = b(ri);
-    for(int j = 0; j < r; ++j) {
-      Wr(i,j) = W(ri, rows[j]);
+    for(int j=0;j<r;++j){
+      Wr(i,j) = We_full(ri, rows[j]);
     }
   }
 
-  addLeastSquaresTerm(qp, Ar, br, Wr);
+  qp.H.noalias() += Ar.transpose() * Wr * Ar;
+  qp.g.noalias() += -Ar.transpose() * Wr * br;
 }
+
 
 void IDProblem::applyConstraintContributions(QPProblem& qp,
                                             const std::vector<std::shared_ptr<IConstraint>>& constraints)
