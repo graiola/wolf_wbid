@@ -128,7 +128,6 @@ add_library(cartesian_trajectory SHARED
 target_link_libraries(cartesian_trajectory)
 
 add_library(task_wrappers SHARED
-    src/task_interface.cpp
     src/${TASK_WRAPPERS_FOLDER}/handler.cpp
     src/${TASK_WRAPPERS_FOLDER}/cartesian.cpp
     src/${TASK_WRAPPERS_FOLDER}/com.cpp
@@ -164,11 +163,9 @@ add_library(id_problem SHARED
     src/wbid/constraints/torque_limits_constraint.cpp
     src/wbid/constraints/dynamics_equality_constraint.cpp
     src/wbid/constraints/base_accel_z_constraint.cpp
-    src/wbid/tasks/aggregated_task_lsq.cpp
     src/wbid/tasks/angular_momentum_task.cpp
     src/wbid/tasks/cartesian_task.cpp
     src/wbid/tasks/com_task.cpp
-    src/wbid/tasks/minimize_variable_task.cpp
     src/wbid/tasks/postural_task.cpp
     src/wbid/tasks/wrench_task.cpp
 )
