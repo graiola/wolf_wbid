@@ -515,11 +515,13 @@ void IDProblem::addLeastSquaresTerm(QPProblem& qp,
   if(A.cols() != qp.n()) throw std::runtime_error("addLeastSquaresTerm: A cols mismatch");
   if(w_diag.size() != m) throw std::runtime_error("addLeastSquaresTerm: w size mismatch");
 
+  const Eigen::VectorXd w_eff = w_diag.array().square().matrix();
+
   // Compute H and g without forming diag(w)
   // H += Σ w_i * a_iᵀ a_i
   // g += -Σ w_i * a_iᵀ b_i
   for(int i = 0; i < m; ++i) {
-    const double wi = w_diag(i);
+    const double wi = w_eff(i);
     if(wi <= 0.0) continue;
     // rank-1 update: H += wi * aᵀ a
     qp.H.noalias() += wi * (A.row(i).transpose() * A.row(i));
@@ -539,9 +541,11 @@ void IDProblem::addLeastSquaresRows(QPProblem& qp,
   if(A.cols() != qp.n()) throw std::runtime_error("addLeastSquaresRows: A cols mismatch");
   if(w_diag.size() != m) throw std::runtime_error("addLeastSquaresRows: w size mismatch");
 
+  const Eigen::VectorXd w_eff = w_diag.array().square().matrix();
+
   for(const int ri : rows) {
     if(ri < 0 || ri >= m) continue;
-    const double wi = w_diag(ri);
+    const double wi = w_eff(ri);
     if(wi <= 0.0) continue;
     qp.H.noalias() += wi * (A.row(ri).transpose() * A.row(ri));
     qp.g.noalias() += (-wi * b(ri)) * A.row(ri).transpose();
