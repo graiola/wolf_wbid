@@ -16,7 +16,7 @@ WrenchImpl::WrenchImpl(const std::string& robot_name,
                        const std::string& contact_name,
                        const IDVariables& vars,
                        const double& period)
-  : Wrench(robot_name, task_id, contact_name, period)
+  : Wrench(robot_name, task_id, contact_name, vars, period, 1.0)
   , TaskRosHandler<wolf_msgs::WrenchTask>(task_id, robot_name, period)
   , vars_(vars)
 {

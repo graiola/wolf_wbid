@@ -1,145 +1,95 @@
 #include <wolf_wbid/wbid/tasks/com_task.h>
-
 #include <wolf_wbid/quadruped_robot.h>
-#include <wolf_wbid/wbid/id_variables.h>
 
 #include <stdexcept>
-#include <cmath>
 
 namespace wolf_wbid {
 
 ComTask::ComTask(const std::string& task_id,
                  QuadrupedRobot& robot,
                  const IDVariables& vars)
-  : task_id_(task_id),
-    robot_(robot),
-    vars_(vars)
+: TaskBase(task_id)
+, robot_(robot)
+, vars_(vars)
 {
-  // Pre-allocate sizes
-  // Jcom_ is 3 x dof_count (robot joint num + floating base dofs if present in model interface)
-  // Here we just let the API fill it; but we must size A_ with vars_.size()
-  A_.setZero(3, vars_.size());
-  b_.setZero(3);
+  qb_ = vars_.qddotBlock();
+  if(qb_.dim <= 0) throw std::runtime_error("ComTask: invalid qddot block");
 
-  lambda1_ = 100.0;
-  lambda2_ = 2.0*std::sqrt(lambda1_);
-  Kp_.setIdentity();
-  Kd_.setIdentity();
+  resize(3, vars_.size());
 
-  // Initialize ref from current state
-  resetReference();
+  // default gains
+  TaskBase::setKp(Eigen::Matrix3d::Identity());
+  TaskBase::setKd(Eigen::Matrix3d::Identity());
 }
 
-void ComTask::setLambda(double lambda)
+void ComTask::setReference(const Eigen::Vector3d& p_ref, const Eigen::Vector3d& v_ref)
 {
-  if(lambda < 0.0) { throw std::invalid_argument("ComTask::setLambda(): lambda < 0"); }
-  lambda1_ = lambda;
-  lambda2_ = 2.0 * std::sqrt(lambda1_);
+  p_ref_ = p_ref;
+  v_ref_ = v_ref;
 }
 
-void ComTask::setLambda(double lambda1, double lambda2)
+// ---- QuadrupedRobot adapters (adjust if needed) ----
+void ComTask::getCOM(Eigen::Vector3d& p_W) const
 {
-  if(lambda1 < 0.0 || lambda2 < 0.0)
-  {
-    throw std::invalid_argument("ComTask::setLambda(lambda1,lambda2): negative gain");
+  robot_.getCOM(p_W);
+}
+void ComTask::getCOMVelocity(Eigen::Vector3d& v_W) const
+{
+  robot_.getCOMVelocity(v_W);
+}
+void ComTask::getCOMJacobian(Eigen::MatrixXd& Jcom) const
+{
+  Jcom.resize(3, robot_.getJointNum());
+  robot_.getCOMJacobian(Jcom);
+}
+void ComTask::getCOMJacobianDotTimesQdot(Eigen::Vector3d& Jdot_qdot) const
+{
+  Jdot_qdot.setZero();
+  // plug if available: robot_.getCOMJacobianDotTimesQdot(Jdot_qdot);
+}
+// ---------------------------------------------------
+
+void ComTask::update(const Eigen::VectorXd& /*x*/)
+{
+  if(!enabled()) {
+    b_.setZero();
+    return;
   }
-  lambda1_ = lambda1;
-  lambda2_ = lambda2;
-}
 
-void ComTask::setReference(const Eigen::Vector3d& pos_ref)
-{
-  pos_ref_ = pos_ref;
-  vel_ref_.setZero();
-  acc_ref_.setZero();
+  Eigen::MatrixXd Jcom;
+  getCOMJacobian(Jcom);
 
-  vel_ref_cached_ = vel_ref_;
-  acc_ref_cached_ = acc_ref_;
-}
+  if(Jcom.cols() != qb_.dim)
+    throw std::runtime_error("ComTask::update(): Jcom cols != qddot dim");
 
-void ComTask::setReference(const Eigen::Vector3d& pos_ref,
-                           const Eigen::Vector3d& vel_ref)
-{
-  pos_ref_ = pos_ref;
-  vel_ref_ = vel_ref;
-  acc_ref_.setZero();
+  A_.setZero();
+  A_.block(0, qb_.offset, 3, qb_.dim) = Jcom;
 
-  vel_ref_cached_ = vel_ref_;
-  acc_ref_cached_ = acc_ref_;
-}
+  // actual
+  getCOM(p_act_);
+  getCOMVelocity(v_act_);
 
-void ComTask::setReference(const Eigen::Vector3d& pos_ref,
-                           const Eigen::Vector3d& vel_ref,
-                           const Eigen::Vector3d& acc_ref)
-{
-  pos_ref_ = pos_ref;
-  vel_ref_ = vel_ref;
-  acc_ref_ = acc_ref;
+  // errors
+  e_p_ = p_ref_ - p_act_;
+  e_v_ = v_ref_ - v_act_;
 
-  vel_ref_cached_ = vel_ref_;
-  acc_ref_cached_ = acc_ref_;
-}
+  if(getKp().rows() != 3 || getKd().rows() != 3)
+    throw std::runtime_error("ComTask::update(): Kp/Kd must be 3x3");
 
-void ComTask::resetReference()
-{
-  // QuadrupedRobot inherits ModelInterfaceRBDL -> ModelInterface
-  // So getCOM() / getCOMVelocity() are available
-  robot_.getCOM(pos_ref_);
-  vel_ref_.setZero();
-  acc_ref_.setZero();
+  Eigen::Vector3d pdd_des = getKp() * e_p_ + getKd() * e_v_;
 
-  vel_ref_cached_ = vel_ref_;
-  acc_ref_cached_ = acc_ref_;
+  Eigen::Vector3d Jdot_qd;
+  getCOMJacobianDotTimesQdot(Jdot_qd);
+
+  b_ = pdd_des - Jdot_qd;
 }
 
 bool ComTask::reset()
 {
-  resetReference();
+  // reference := current com
+  getCOM(p_ref_);
+  v_ref_.setZero();
   return true;
-}
-
-void ComTask::update(const Eigen::VectorXd& x)
-{
-  // cache feedforward terms (match OpenSoT behavior)
-  vel_ref_cached_ = vel_ref_;
-  acc_ref_cached_ = acc_ref_;
-
-  // pull qddot from x
-  const Eigen::VectorXd qddot = vars_.qddot(x);
-
-  // get CoM Jacobian and bias term dJcomQdot
-  // Signature you showed:
-  // void ModelInterface::getCOMJacobian(Eigen::MatrixXd &J, Eigen::Vector3d &dJcomQdot) const
-  robot_.getCOMJacobian(Jcom_, dJcomQdot_);
-
-  // actual CoM and velocity
-  robot_.getCOM(pos_current_);
-  robot_.getCOMVelocity(vel_current_);
-
-  // errors
-  pos_error_ = pos_ref_ - pos_current_;
-  vel_error_ = vel_ref_ - vel_current_;
-
-  // cartesian acceleration term: Jcom*qddot + dJcomQdot
-  //Eigen::Vector3d com_acc = Jcom_ * qddot + dJcomQdot_;
-
-  // desired com acceleration y (OpenSoT sign convention):
-  // OpenSoT builds: cart_task = J*qddot + dJdq - acc_ref - lambda2*Kd*(vel_ref - vel) - lambda*Kp*pos_err
-  // Then A = cart_task.getM(), b = -cart_task.getq()  -> equivalent to minimizing J*qddot ~= acc_ref + ...
-  Eigen::Vector3d y = acc_ref_
-                    + lambda2_ * (Kd_ * vel_error_)
-                    + lambda1_ * (Kp_ * pos_error_);
-
-  // Build A,b in terms of full x: only qddot block is involved
-  A_.setZero(3, vars_.size());
-  A_.block(0, vars_.qddotBlock().offset, 3, vars_.qddotBlock().dim) = Jcom_;
-
-  // residual: J*qddot + dJdq ~= y  => J*qddot ~= y - dJdq
-  b_ = y - dJcomQdot_;
-
-  // reset feed-forward for safety (OpenSoT behavior)
-  vel_ref_.setZero();
-  acc_ref_.setZero();
 }
 
 } // namespace wolf_wbid

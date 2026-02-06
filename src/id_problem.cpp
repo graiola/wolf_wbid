@@ -1,13 +1,14 @@
 #include <wolf_wbid/id_problem.h>
-
 #include <wolf_wbid/wbid/qp/qp_solver_factory.h>
+
+#include <wolf_controller_utils/common.h>
 
 #include <stdexcept>
 #include <limits>
 #include <algorithm>
 #include <cmath>
 
-// wrappers ROS
+// Wrappers (ROS1/ROS2)
 #ifdef ROS
   #include <wolf_wbid/task_ros_wrappers/cartesian.h>
   #include <wolf_wbid/task_ros_wrappers/com.h>
@@ -31,37 +32,26 @@ static inline std::vector<int> rowsXY()  { return {0,1}; }
 static inline std::vector<int> rowsZ()   { return {2}; }
 static inline std::vector<int> rowsRPY() { return {3,4,5}; }
 
-static inline std::vector<int> rowsLimbs(int task_size)
-{
-  std::vector<int> r;
-  r.reserve(std::max(0, task_size - FLOATING_BASE_DOFS));
-  for(int i = FLOATING_BASE_DOFS; i < task_size; ++i) r.push_back(i);
-  return r;
-}
-
-// ----------------------------------------------------------------------------
-// Block regularization (qddot + eps, contacts + eps^2)
-// ----------------------------------------------------------------------------
+/**
+ * Block regularization:
+ *  - qddot block: +eps
+ *  - contact blocks: +eps^2
+ */
 static inline void applyBlockRegularization(Eigen::MatrixXd& H,
                                             const IDVariables& vars,
                                             const std::vector<std::string>& contacts,
                                             double eps)
 {
-  if(!(std::isfinite(eps) && eps > 0.0)) {
-    return;
-  }
+  if(!(std::isfinite(eps) && eps > 0.0)) return;
 
   const double eps2 = eps * eps;
 
-  // qddot block
   const auto& qb = vars.qddotBlock();
   if(qb.dim > 0) {
     H.block(qb.offset, qb.offset, qb.dim, qb.dim).diagonal().array() += eps;
   }
 
-  // contact blocks
-  for(const auto& cname : contacts)
-  {
+  for(const auto& cname : contacts) {
     if(!vars.hasContact(cname)) continue;
     const auto& cb = vars.contactBlock(cname);
     if(cb.dim > 0) {
@@ -70,54 +60,8 @@ static inline void applyBlockRegularization(Eigen::MatrixXd& H,
   }
 }
 
-// ----------------------------------------------------------------------------
-// OpenSoT-compat weights patch:
-// - if W is (almost) diagonal, square the diagonal -> W_eff = diag(w)^2
-// - else keep W unchanged (non-diagonal weights are rare; squaring them changes semantics)
-// ----------------------------------------------------------------------------
-static inline bool isAlmostDiagonal(const Eigen::MatrixXd& W, double tol = 1e-12)
-{
-  if(W.rows() != W.cols()) return false;
-  const int n = W.rows();
-  for(int i=0;i<n;++i){
-    for(int j=0;j<n;++j){
-      if(i==j) continue;
-      if(std::abs(W(i,j)) > tol) return false;
-    }
-  }
-  return true;
-}
-
-static inline Eigen::MatrixXd makeWeightCompat_OpenSoT(const Eigen::MatrixXd& W)
-{
-  if(W.size() == 0) return W;
-
-  // Typical tasks use diagonal weights
-  if(isAlmostDiagonal(W)) {
-    Eigen::MatrixXd We = W;
-    We.diagonal().array() = We.diagonal().array().square();
-    return We;
-  }
-
-  // Non-diagonal: keep as-is (safe)
-  // If you *really* want to force squaring, tell me and we can do:
-  //   - We = W * W  (matrix product)  OR
-  //   - We = W.cwiseProduct(W) (element-wise)
-  return W;
-}
-
 IDProblem::IDProblem(QuadrupedRobot::Ptr model)
 : model_(std::move(model))
-, control_mode_(WPG)
-, initialized_(false)
-, activate_com_z_(true)
-, activate_angular_momentum_(true)
-, activate_postural_(false)
-, activate_joint_position_limits_(false)
-, change_control_mode_(false)
-, regularization_value_(1e-3)
-, min_forces_weight_(0.0)
-, min_qddot_weight_(0.0)
 {
   if(!model_) throw std::runtime_error("IDProblem: null model");
 
@@ -125,7 +69,7 @@ IDProblem::IDProblem(QuadrupedRobot::Ptr model)
   ee_names_      = model_->getEndEffectorNames();
   contact_names_ = model_->getContactNames();
 
-  // defaults (match old behavior)
+  // Defaults
   x_force_lower_lim_ = -2000.0;
   y_force_lower_lim_ = -2000.0;
   z_force_lower_lim_ = 0.1 * GRAVITY * (model_->getMass() / N_LEGS);
@@ -142,46 +86,45 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
 {
   if(initialized_) return;
 
-  // variables: qddot + point-contact forces
-  vars_ = std::make_unique<IDVariables>(model_->getJointNum(),
-                                       foot_names_,
-                                       IDVariables::ContactModel::POINT_CONTACT);
+  // Variables: qddot + point-contact forces
+  vars_ = std::make_unique<IDVariables>(
+    model_->getJointNum(),
+    foot_names_,
+    IDVariables::ContactModel::POINT_CONTACT
+  );
 
   const std::string base_link = model_->getBaseLinkName();
 
-  // --- tasks ---------------------------------------------------------------
-  // Feet Cartesian tasks
-  for(const auto& fn : foot_names_)
-  {
+  // -------------------- Tasks --------------------
+
+  // Feet cartesian tasks
+  for(const auto& fn : foot_names_) {
     feet_[fn] = std::make_shared<CartesianImpl>(
-      robot_name,
-      fn,                // task_id
+      robot_name, fn,
       *model_,
-      fn,                // distal link
-      WORLD_FRAME_NAME,  // base link (world)
+      fn,               // distal link
+      WORLD_FRAME_NAME, // base link
       *vars_,
       dt,
-      /*use_mesh=*/false
+      false
     );
     feet_[fn]->setGainType(CartesianTask::GainType::Force);
-    feet_[fn]->setLambda(0., 0.);                  // WPG default
-    feet_[fn]->OPTIONS.set_ext_lambda = false;     // WPG default
+    feet_[fn]->setLambda(0., 0.);
+    feet_[fn]->OPTIONS.set_ext_lambda = false;
     feet_[fn]->loadParams();
     feet_[fn]->registerReconfigurableVariables();
   }
 
-  // Arms Cartesian tasks (external refs by default, as in old code note)
-  for(const auto& ee : ee_names_)
-  {
+  // Arms cartesian tasks (external references by default)
+  for(const auto& ee : ee_names_) {
     arms_[ee] = std::make_shared<CartesianImpl>(
-      robot_name,
-      ee,        // task_id
+      robot_name, ee,
       *model_,
-      ee,        // distal link
-      base_link, // base link
+      ee,
+      base_link,
       *vars_,
       dt,
-      /*use_mesh=*/false
+      false
     );
     arms_[ee]->setGainType(CartesianTask::GainType::Acceleration);
     arms_[ee]->setLambda(1., 1.);
@@ -190,17 +133,15 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     arms_[ee]->registerReconfigurableVariables();
   }
 
-  // Wrench tasks (POINT_CONTACT force tracking)
-  for(const auto& fn : foot_names_)
-  {
+  // Wrench (force tracking) tasks
+  for(const auto& fn : foot_names_) {
     wrenches_[fn] = std::make_shared<WrenchImpl>(
       robot_name,
-      fn + std::string("_wrench"), // task_id
-      fn,                          // contact_name
+      fn + std::string("_wrench"),
+      fn,       // contact name
       *vars_,
       dt
     );
-    // keep reference/weight configurable
     wrenches_[fn]->loadParams();
     wrenches_[fn]->registerReconfigurableVariables();
   }
@@ -208,9 +149,9 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   // Angular momentum
   angular_momentum_ = std::make_shared<AngularMomentumImpl>(
     robot_name,
+    "angular_momentum",
     *model_,
     *vars_,
-    "angular_momentum",
     dt
   );
   angular_momentum_->setLambda(0.);
@@ -219,16 +160,16 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   angular_momentum_->loadParams();
   angular_momentum_->registerReconfigurableVariables();
 
-  // Waist Cartesian task
+  // Waist cartesian task
   waist_ = std::make_shared<CartesianImpl>(
     robot_name,
     "waist",
     *model_,
-    base_link,         // distal link = base itself
-    WORLD_FRAME_NAME,  // base link (world)
+    base_link,
+    WORLD_FRAME_NAME,
     *vars_,
     dt,
-    /*use_mesh=*/false
+    false
   );
   waist_->setGainType(CartesianTask::GainType::Force);
   waist_->setLambda(1., 1.);
@@ -243,7 +184,6 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     *vars_,
     dt
   );
-  postural_->setGainType(PosturalTask::GainType::Force);
   postural_->setLambda(1., 1.);
   postural_->loadParams();
   postural_->registerReconfigurableVariables();
@@ -261,36 +201,32 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   com_->loadParams();
   com_->registerReconfigurableVariables();
 
-  // --- constraints ---------------------------------------------------------
+  // -------------------- Constraints --------------------
   constraints_.clear();
 
-  // friction cones per foot
+  // Friction cones
   friction_cones_.clear();
-  for(const auto& fn : foot_names_)
-  {
+  for(const auto& fn : foot_names_) {
     auto fc = std::make_shared<FrictionConeConstraint>(fn, *vars_, mu_, fc_R_);
     friction_cones_[fn] = fc;
     constraints_.push_back(fc);
   }
 
-  // force bounds per foot
+  // Force bounds
   force_bounds_.clear();
-  for(const auto& fn : foot_names_)
-  {
+  for(const auto& fn : foot_names_) {
     Eigen::Vector3d fmin(x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_);
     Eigen::Vector3d fmax = wrench_upper_lims_.head<3>();
-
     auto cb = std::make_shared<ContactForceBoundsConstraint>(fn, *vars_, fmin, fmax);
     force_bounds_[fn] = cb;
     constraints_.push_back(cb);
   }
 
-  // torque limits
+  // Torque limits
   {
     Eigen::VectorXd tau_max;
     model_->getEffortLimits(tau_max);
-    if(tau_max.size() >= FLOATING_BASE_DOFS)
-      tau_max.head(FLOATING_BASE_DOFS).setZero();
+    if(tau_max.size() >= FLOATING_BASE_DOFS) tau_max.head(FLOATING_BASE_DOFS).setZero();
     tau_max = 0.9 * tau_max;
 
     torque_limits_ = std::make_shared<TorqueLimitsConstraint>(
@@ -303,40 +239,19 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     constraints_.push_back(torque_limits_);
   }
 
-  // --- hard constraint: prevent "falling solution" (qddot_base_z = 0)
-  //base_accel_z_ = std::make_shared<BaseAccelZConstraint>(
-  //  "base_accel_z",
-  //  *vars_,
-  //  BaseAccelZConstraint::Mode::EQUALITY,
-  //  /*eps=*/0.0
-  //);
-  //base_accel_z_->setEnabled(true);
-  //constraints_.push_back(base_accel_z_);
+  // Optional constraints left disabled by default:
+  // base_accel_z_  / base_accel_fb_
 
-  // --- floating base accel constraint (coerente con base_accel_z)
-  // Consiglio per stand-up: blocca tutto tranne z:
-  //   x,y,roll,pitch,yaw = 0
-  // (z lo gestisce base_accel_z_)
-  //base_accel_fb_ = std::make_shared<FloatingBaseAccelConstraint>(
-  //  "base_accel_fb",
-  //  *vars_,
-  //  /*base_indices=*/std::vector<int>{2, 3, 4},
-  //  FloatingBaseAccelConstraint::Mode::EQUALITY,
-  //  /*eps=*/0.5
-  //);
-  //base_accel_fb_->setEnabled(true);
-  //constraints_.push_back(base_accel_fb_);
-
-  // solver
+  // Solver
   solver_ = CreateDefaultSolver();
   if(!solver_) throw std::runtime_error("IDProblem::init(): solver factory returned null");
 
-  // buffers
+  // Buffers
   x_.setZero(vars_->size());
   qddot_.setZero(model_->getJointNum());
   contact_wrenches_.resize(foot_names_.size(), Eigen::Vector6d::Zero());
 
-  // replicate old behavior: start in WPG (no external refs)
+  // Mode
   control_mode_ = WPG;
   change_control_mode_ = true;
   update();
@@ -362,7 +277,6 @@ void IDProblem::setFrictionConesMu(const double& mu)
   if(mu < 0.0 || mu > 1.0) throw std::runtime_error("mu out of [0,1]");
   mu_ = mu;
 }
-
 double IDProblem::getFrictionConesMu() const { return mu_; }
 void IDProblem::setFrictionConesR(const Eigen::Matrix3d& R) { fc_R_ = R; }
 
@@ -383,12 +297,17 @@ void IDProblem::activateJointPositionLimits(bool active) { activate_joint_positi
 
 void IDProblem::setRegularization(double r)
 {
-  if(r <= 0.0 || r >= 1.0) return;
+  if(!(r > 0.0) || !(r < 1.0)) return;
   regularization_value_ = r;
 }
-
-void IDProblem::setForcesMinimizationWeight(double w) { if(w>=0.0) min_forces_weight_ = w; }
-void IDProblem::setJointAccelerationMinimizationWeight(double w) { if(w>=0.0) min_qddot_weight_ = w; }
+void IDProblem::setForcesMinimizationWeight(double w)
+{
+  if(w >= 0.0) min_forces_weight_ = w;
+}
+void IDProblem::setJointAccelerationMinimizationWeight(double w)
+{
+  if(w >= 0.0) min_qddot_weight_ = w;
+}
 
 const std::map<std::string,Cartesian::Ptr>& IDProblem::getFootTasks() const { return feet_; }
 const std::map<std::string,Cartesian::Ptr>& IDProblem::getArmTasks() const { return arms_; }
@@ -398,20 +317,23 @@ const Com::Ptr& IDProblem::getComTask() const { return com_; }
 
 void IDProblem::activateExternalReferences(bool activate)
 {
-  for(const auto& fn : foot_names_)     feet_[fn]->OPTIONS.set_ext_reference = activate;
-  for(const auto& fn : foot_names_)     wrenches_[fn]->OPTIONS.set_ext_reference = activate;
-  waist_->OPTIONS.set_ext_reference = activate;
-  postural_->OPTIONS.set_ext_reference = activate;
-  com_->OPTIONS.set_ext_reference = activate;
+  for(const auto& fn : foot_names_)   feet_[fn]->OPTIONS.set_ext_reference = activate;
+  for(const auto& fn : foot_names_)   wrenches_[fn]->OPTIONS.set_ext_reference = activate;
+  waist_->OPTIONS.set_ext_reference   = activate;
+  postural_->OPTIONS.set_ext_reference= activate;
+  com_->OPTIONS.set_ext_reference     = activate;
 }
 
 void IDProblem::reset()
 {
+  // Wrapper reset (kept as in your pattern)
   for(auto& kv : arms_)     { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
   for(auto& kv : feet_)     { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
   for(auto& kv : wrenches_) { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
-  waist_->update(Eigen::VectorXd(1)); waist_->reset();
-  com_->update(Eigen::VectorXd(1));   com_->reset();
+  waist_->update(Eigen::VectorXd(1));      waist_->reset();
+  com_->update(Eigen::VectorXd(1));        com_->reset();
+  postural_->update(Eigen::VectorXd(1));   postural_->reset();
+  angular_momentum_->update(Eigen::VectorXd(1)); angular_momentum_->reset();
 
   change_control_mode_ = false;
 }
@@ -425,6 +347,7 @@ void IDProblem::setFootReference(const std::string& foot_name,
     feet_.at(foot_name)->setReference(pose_ref, vel_ref);
     return;
   }
+
   if(reference_frame == WORLD_FRAME_NAME) {
     tmp_affine3d_ = model_->getBasePoseInWorld().inverse();
     tmp_vector6d_.setZero();
@@ -433,10 +356,13 @@ void IDProblem::setFootReference(const std::string& foot_name,
     feet_.at(foot_name)->setReference(tmp_affine3d_, tmp_vector6d_);
     return;
   }
+
   throw std::runtime_error("Wrong reference frame in setFootReference()");
 }
 
-void IDProblem::setWaistReference(const Eigen::Matrix3d& Rot, const double& z, const double& z_vel)
+void IDProblem::setWaistReference(const Eigen::Matrix3d& Rot,
+                                  const double& z,
+                                  const double& z_vel)
 {
   tmp_vector6d_.setZero();
   tmp_affine3d_.setIdentity();
@@ -446,12 +372,15 @@ void IDProblem::setWaistReference(const Eigen::Matrix3d& Rot, const double& z, c
   waist_->setReference(tmp_affine3d_, tmp_vector6d_);
 }
 
-void IDProblem::setComReference(const Eigen::Vector3d& position, const Eigen::Vector3d& velocity)
+void IDProblem::setComReference(const Eigen::Vector3d& position,
+                                const Eigen::Vector3d& velocity)
 {
   com_->setReference(position, velocity);
 }
 
-void IDProblem::setPosture(const Eigen::MatrixXd& Kp, const Eigen::MatrixXd& Kd, const Eigen::VectorXd& q)
+void IDProblem::setPosture(const Eigen::MatrixXd& Kp,
+                           const Eigen::MatrixXd& Kd,
+                           const Eigen::VectorXd& q)
 {
   postural_->setGains(Kp, Kd);
   postural_->setReference(q);
@@ -466,7 +395,7 @@ void IDProblem::swingWithFoot(const std::string& foot_name, const std::string& r
 
   if(force_bounds_.count(foot_name)) force_bounds_.at(foot_name)->releaseContact(true);
   if(torque_limits_) torque_limits_->disableContact(foot_name);
-  if(dynamics_eq_) dynamics_eq_->disableContact(foot_name);
+  if(dynamics_eq_)   dynamics_eq_->disableContact(foot_name);
 }
 
 void IDProblem::stanceWithFoot(const std::string& foot_name, const std::string& ref_frame)
@@ -478,13 +407,14 @@ void IDProblem::stanceWithFoot(const std::string& foot_name, const std::string& 
 
   if(force_bounds_.count(foot_name)) force_bounds_.at(foot_name)->releaseContact(false);
   if(torque_limits_) torque_limits_->enableContact(foot_name);
-  if(dynamics_eq_) dynamics_eq_->enableContact(foot_name);
+  if(dynamics_eq_)   dynamics_eq_->enableContact(foot_name);
 }
 
 void IDProblem::publish()
 {
   for(auto& kv : feet_) kv.second->publish();
   for(auto& kv : arms_) kv.second->publish();
+  for(auto& kv : wrenches_) kv.second->publish();
   waist_->publish();
   com_->publish();
   postural_->publish();
@@ -499,17 +429,13 @@ void IDProblem::update()
   wrench_lower_lims_(2) = z_force_lower_lim_;
 
   // Update constraints params
-  for(const auto& fn : foot_names_)
-  {
-    if(friction_cones_.count(fn))
-    {
+  for(const auto& fn : foot_names_) {
+    if(friction_cones_.count(fn)) {
       friction_cones_.at(fn)->setContactRotation(fc_R_);
       friction_cones_.at(fn)->setMu(mu_);
       friction_cones_.at(fn)->setEnabled(contact_enabled_[fn]);
     }
-
-    if(force_bounds_.count(fn))
-    {
+    if(force_bounds_.count(fn)) {
       Eigen::Vector3d fmin(x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_);
       Eigen::Vector3d fmax = wrench_upper_lims_.head<3>();
       force_bounds_.at(fn)->setMin(fmin);
@@ -520,20 +446,13 @@ void IDProblem::update()
   }
 
   // Mode switch logic
-  if(change_control_mode_)
-  {
-    if(control_mode_ == EXT)
-    {
-      for(size_t i = 0; i < foot_names_.size(); ++i)
-      {
+  if(change_control_mode_) {
+    if(control_mode_ == EXT) {
+      for(size_t i = 0; i < foot_names_.size(); ++i) {
         const auto& fn = foot_names_[i];
-
-        if(i < contact_wrenches_.size())
-          wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
-
+        if(i < contact_wrenches_.size()) wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
         feet_[fn]->setLambda(1., 1.);
       }
-
       waist_->setReference(model_->getBasePoseInWorld());
       model_->getCOM(tmp_vector3d_);
       tmp_vector3d_1_.setZero();
@@ -541,20 +460,13 @@ void IDProblem::update()
 
       reset();
       activateExternalReferences(true);
-    }
-    else // WPG
-    {
-      for(size_t i = 0; i < foot_names_.size(); ++i)
-      {
+    } else { // WPG
+      for(size_t i = 0; i < foot_names_.size(); ++i) {
         const auto& fn = foot_names_[i];
-
-        if(i < contact_wrenches_.size())
-          wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
-
+        if(i < contact_wrenches_.size()) wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
         feet_[fn]->setBaseLink(WORLD_FRAME_NAME);
         feet_[fn]->setLambda(0., 0.);
       }
-
       waist_->setReference(model_->getBasePoseInWorld());
       model_->getCOM(tmp_vector3d_);
       tmp_vector3d_1_.setZero();
@@ -565,9 +477,8 @@ void IDProblem::update()
     }
   }
 
-  // Tasks update with dummy x
+  // Tasks update with dummy x (deterministic and keeps A/b current for debug)
   Eigen::VectorXd x_dummy = Eigen::VectorXd::Zero(vars_->size());
-
   for(auto& kv : feet_)     kv.second->update(x_dummy);
   for(auto& kv : arms_)     kv.second->update(x_dummy);
   for(auto& kv : wrenches_) kv.second->update(x_dummy);
@@ -583,61 +494,70 @@ void IDProblem::setDefaultBounds(QPProblem& qp)
   qp.u.setConstant(qp.n(),  kBig());
 }
 
+/**
+ * Add full LS term with diagonal weights:
+ *    min || diag(sqrt(w)) (A x - b) ||^2
+ *
+ * Normal equations:
+ *    H += Aᵀ diag(w) A
+ *    g += -Aᵀ diag(w) b
+ *
+ * NOTE: w are *row weights* (not sqrt).
+ */
 void IDProblem::addLeastSquaresTerm(QPProblem& qp,
-                                   const Eigen::MatrixXd& A,
-                                   const Eigen::VectorXd& b,
-                                   const Eigen::MatrixXd& W)   // sqrt-weight
+                                    const Eigen::MatrixXd& A,
+                                    const Eigen::VectorXd& b,
+                                    const Eigen::VectorXd& w_diag)
 {
-  // OpenSoT semantics: minimize || W(Ax - b) ||^2
-  // => H += Aᵀ WᵀW A, g += -Aᵀ WᵀW b
-  const Eigen::MatrixXd We = W.transpose() * W;
+  const int m = static_cast<int>(b.size());
+  if(m == 0) return;
+  if(A.rows() != m) throw std::runtime_error("addLeastSquaresTerm: A/b row mismatch");
+  if(A.cols() != qp.n()) throw std::runtime_error("addLeastSquaresTerm: A cols mismatch");
+  if(w_diag.size() != m) throw std::runtime_error("addLeastSquaresTerm: w size mismatch");
 
-  qp.H.noalias() += A.transpose() * We * A;
-  qp.g.noalias() += -A.transpose() * We * b;
+  // Compute H and g without forming diag(w)
+  // H += Σ w_i * a_iᵀ a_i
+  // g += -Σ w_i * a_iᵀ b_i
+  for(int i = 0; i < m; ++i) {
+    const double wi = w_diag(i);
+    if(wi <= 0.0) continue;
+    // rank-1 update: H += wi * aᵀ a
+    qp.H.noalias() += wi * (A.row(i).transpose() * A.row(i));
+    qp.g.noalias() += (-wi * b(i)) * A.row(i).transpose();
+  }
 }
-
 
 void IDProblem::addLeastSquaresRows(QPProblem& qp,
-                                   const Eigen::MatrixXd& A,
-                                   const Eigen::VectorXd& b,
-                                   const Eigen::MatrixXd& W,            // sqrt-weight
-                                   const std::vector<int>& rows)
+                                    const Eigen::MatrixXd& A,
+                                    const Eigen::VectorXd& b,
+                                    const Eigen::VectorXd& w_diag,
+                                    const std::vector<int>& rows)
 {
-  const int r = (int)rows.size();
-  if(r <= 0) return;
+  const int m = static_cast<int>(b.size());
+  if(m == 0) return;
+  if(A.rows() != m) throw std::runtime_error("addLeastSquaresRows: A/b row mismatch");
+  if(A.cols() != qp.n()) throw std::runtime_error("addLeastSquaresRows: A cols mismatch");
+  if(w_diag.size() != m) throw std::runtime_error("addLeastSquaresRows: w size mismatch");
 
-  const Eigen::MatrixXd We_full = W.transpose() * W;
-
-  Eigen::MatrixXd Ar(r, A.cols());
-  Eigen::VectorXd br(r);
-  Eigen::MatrixXd Wr(r, r);
-
-  for(int i=0;i<r;++i){
-    const int ri = rows[i];
-    Ar.row(i) = A.row(ri);
-    br(i) = b(ri);
-    for(int j=0;j<r;++j){
-      Wr(i,j) = We_full(ri, rows[j]);
-    }
+  for(const int ri : rows) {
+    if(ri < 0 || ri >= m) continue;
+    const double wi = w_diag(ri);
+    if(wi <= 0.0) continue;
+    qp.H.noalias() += wi * (A.row(ri).transpose() * A.row(ri));
+    qp.g.noalias() += (-wi * b(ri)) * A.row(ri).transpose();
   }
-
-  qp.H.noalias() += Ar.transpose() * Wr * Ar;
-  qp.g.noalias() += -Ar.transpose() * Wr * br;
 }
 
-
 void IDProblem::applyConstraintContributions(QPProblem& qp,
-                                            const std::vector<std::shared_ptr<IConstraint>>& constraints)
+                                             const std::vector<std::shared_ptr<IConstraint>>& constraints)
 {
-  // 1) merge bounds contributions (ConstraintBase only)
-  for(const auto& c : constraints)
-  {
+  // 1) Merge bounds contributions (ConstraintBase only)
+  for(const auto& c : constraints) {
     if(!c) continue;
     if(!c->enabled()) continue;
 
     const auto* cb = dynamic_cast<const ConstraintBase*>(c.get());
-    if(cb && cb->hasBounds())
-    {
+    if(cb && cb->hasBounds()) {
       if(cb->l().size() != qp.n() || cb->u().size() != qp.n())
         throw std::runtime_error("Constraint bounds size mismatch in " + c->name());
 
@@ -646,10 +566,9 @@ void IDProblem::applyConstraintContributions(QPProblem& qp,
     }
   }
 
-  // 2) stack linear constraints A/lA/uA
+  // 2) Stack linear constraints
   int m_total = 0;
-  for(const auto& c : constraints)
-  {
+  for(const auto& c : constraints) {
     if(!c) continue;
     if(!c->enabled()) continue;
     m_total += c->rows();
@@ -660,8 +579,7 @@ void IDProblem::applyConstraintContributions(QPProblem& qp,
   qp.uA.resize(m_total);
 
   int row = 0;
-  for(const auto& c : constraints)
-  {
+  for(const auto& c : constraints) {
     if(!c) continue;
     if(!c->enabled()) continue;
 
@@ -692,66 +610,71 @@ bool IDProblem::buildQP(QPProblem& qp)
   // Regularization
   applyBlockRegularization(qp.H, *vars_, foot_names_, regularization_value_);
 
-  if(min_qddot_weight_ > 0.0)
-  {
+  if(min_qddot_weight_ > 0.0) {
     const auto& b = vars_->qddotBlock();
     qp.H.block(b.offset, b.offset, b.dim, b.dim).diagonal().array() += min_qddot_weight_;
   }
-
-  if(min_forces_weight_ > 0.0)
-  {
-    for(const auto& fn : foot_names_)
-    {
+  if(min_forces_weight_ > 0.0) {
+    for(const auto& fn : foot_names_) {
       const auto& b = vars_->contactBlock(fn);
       qp.H.block(b.offset, b.offset, b.dim, b.dim).diagonal().array() += min_forces_weight_;
     }
   }
 
-  // --- tasks -> LS
-  for(const auto& fn : foot_names_)
-  {
+  // -------- Tasks -> objective --------
+
+  // Feet: position only (xyz)
+  for(const auto& fn : foot_names_) {
     const auto& t = *feet_.at(fn);
-    addLeastSquaresRows(qp, t.A(), t.b(), t.W(), {0,1,2});
+    addLeastSquaresRows(qp, t.A(), t.b(), t.wDiag(), rowsXYZ());
   }
 
-  for(const auto& ee : ee_names_)
-  {
+  // Arms: full 6D
+  for(const auto& ee : ee_names_) {
     const auto& t = *arms_.at(ee);
-    addLeastSquaresTerm(qp, t.A(), t.b(), t.W());
+    addLeastSquaresTerm(qp, t.A(), t.b(), t.wDiag());
   }
 
-  // waist + com split
+  // Waist + CoM split logic
   {
     const auto& w = *waist_;
     const auto& c = *com_;
 
     if(activate_com_z_) {
-      addLeastSquaresRows(qp, w.A(), w.b(), w.W(), rowsRPY());
-      addLeastSquaresRows(qp, c.A(), c.b(), c.W(), rowsXYZ());
+      addLeastSquaresRows(qp, w.A(), w.b(), w.wDiag(), rowsRPY());
+      addLeastSquaresRows(qp, c.A(), c.b(), c.wDiag(), rowsXYZ());
     } else {
       auto wzrpy = rowsRPY();
-      wzrpy.insert(wzrpy.begin(), 2);
-      addLeastSquaresRows(qp, w.A(), w.b(), w.W(), wzrpy);
-      addLeastSquaresRows(qp, c.A(), c.b(), c.W(), rowsXY());
+      wzrpy.insert(wzrpy.begin(), 2); // include z
+      addLeastSquaresRows(qp, w.A(), w.b(), w.wDiag(), wzrpy);
+      addLeastSquaresRows(qp, c.A(), c.b(), c.wDiag(), rowsXY());
     }
   }
 
-  if(activate_angular_momentum_)
-  {
-    const auto& t = *angular_momentum_;
-    addLeastSquaresTerm(qp, t.A(), t.b(), t.W());
+  // Wrench tracking (optional: keep if you want to preserve EXT behavior; usually enabled by params)
+  for(const auto& fn : foot_names_) {
+    const auto& t = *wrenches_.at(fn);
+    addLeastSquaresTerm(qp, t.A(), t.b(), t.wDiag());
   }
 
-  // if(activate_postural_) { ... }
+  // Momentum
+  if(activate_angular_momentum_) {
+    const auto& t = *angular_momentum_;
+    addLeastSquaresTerm(qp, t.A(), t.b(), t.wDiag());
+  }
 
-  // --- constraints update + merge
-  for(const auto& c : constraints_)
-  {
+  // Postural
+  if(activate_postural_) {
+    const auto& t = *postural_;
+    addLeastSquaresTerm(qp, t.A(), t.b(), t.wDiag());
+  }
+
+  // -------- Constraints update + merge --------
+  for(const auto& c : constraints_) {
     if(!c) continue;
     if(!c->enabled()) continue;
     c->update(x_);
   }
-
   applyConstraintContributions(qp, constraints_);
 
   return true;
@@ -760,14 +683,10 @@ bool IDProblem::buildQP(QPProblem& qp)
 bool IDProblem::solveQP(IQPSolver& solver, const QPProblem& qp, Eigen::VectorXd& x)
 {
   const QPSolution sol = solver.solve(qp);
+  if(!sol.success) return false;
 
-  if(!sol.success) {
-    return false;
-  }
-
-  if(sol.x.size() != qp.n()) {
+  if(sol.x.size() != qp.n())
     throw std::runtime_error("IDProblem::solveQP(): solver returned wrong x size");
-  }
 
   x = sol.x;
   return true;
@@ -784,7 +703,7 @@ bool IDProblem::solve(Eigen::VectorXd& tau)
 
   update();
 
-  bool qp_built = buildQP(qp_);
+  const bool qp_built = buildQP(qp_);
   if(!qp_built) {
     debugDumpSolveStep(&qp_, nullptr, nullptr, false, false, false);
     return false;
@@ -795,75 +714,58 @@ bool IDProblem::solve(Eigen::VectorXd& tau)
     return false;
   }
 
-  bool qp_solved = solveQP(*solver_, qp_, x_);
+  const bool qp_solved = solveQP(*solver_, qp_, x_);
   if(!qp_solved) {
     debugDumpSolveStep(&qp_, &x_, nullptr, true, false, false);
     return false;
   }
 
-  bool torque_ok = computeTauFromSolution(x_, tau);
-
+  const bool torque_ok = computeTauFromSolution(x_, tau);
   debugDumpSolveStep(&qp_, &x_, &tau, true, true, torque_ok);
 
   return torque_ok;
 }
 
-const std::vector<Eigen::Vector6d>& IDProblem::getContactWrenches() const { return contact_wrenches_; }
-const Eigen::VectorXd& IDProblem::getJointAccelerations() const { return qddot_; }
+const std::vector<Eigen::Vector6d>& IDProblem::getContactWrenches() const
+{
+  return contact_wrenches_;
+}
+
+const Eigen::VectorXd& IDProblem::getJointAccelerations() const
+{
+  return qddot_;
+}
 
 // -----------------------------------------------------------------------------
-// Debug helpers (unchanged)
+// Debug helpers
 // -----------------------------------------------------------------------------
-
 void IDProblem::debugPrintVecStats(const std::string& name, const Eigen::VectorXd& v)
 {
-  if(v.size() == 0) {
-    std::cout << "[DBG] " << name << ": <empty>\n";
-    return;
-  }
+  if(v.size() == 0) { std::cout << "[DBG] " << name << ": <empty>\n"; return; }
   const double n = v.norm();
   const double minv = v.minCoeff();
   const double maxv = v.maxCoeff();
-  std::cout << "[DBG] " << name
-            << " size=" << v.size()
-            << " norm=" << n
-            << " min=" << minv
-            << " max=" << maxv
-            << "\n";
+  std::cout << "[DBG] " << name << " size=" << v.size() << " norm=" << n
+            << " min=" << minv << " max=" << maxv << "\n";
 }
 
 void IDProblem::debugPrintMatStats(const std::string& name, const Eigen::MatrixXd& M)
 {
-  if(M.size() == 0) {
-    std::cout << "[DBG] " << name << ": <empty>\n";
-    return;
-  }
+  if(M.size() == 0) { std::cout << "[DBG] " << name << ": <empty>\n"; return; }
   const double fro = M.norm();
-  std::cout << "[DBG] " << name
-            << " rows=" << M.rows()
-            << " cols=" << M.cols()
-            << " fro_norm=" << fro
-            << "\n";
+  std::cout << "[DBG] " << name << " rows=" << M.rows() << " cols=" << M.cols()
+            << " fro_norm=" << fro << "\n";
 }
 
-void IDProblem::debugPrintBoundsStats(const std::string& name,
-                                     const Eigen::VectorXd& l,
-                                     const Eigen::VectorXd& u)
+void IDProblem::debugPrintBoundsStats(const std::string& name, const Eigen::VectorXd& l, const Eigen::VectorXd& u)
 {
-  if(l.size() == 0 || u.size() == 0) {
-    std::cout << "[DBG] " << name << ": <empty bounds>\n";
-    return;
-  }
+  if(l.size() == 0 || u.size() == 0) { std::cout << "[DBG] " << name << ": <empty bounds>\n"; return; }
   int bad = 0;
-  for(int i = 0; i < l.size(); ++i) {
-    if(l(i) > u(i)) bad++;
-  }
-  std::cout << "[DBG] " << name
-            << " bounds size=" << l.size()
+  for(int i = 0; i < l.size(); ++i) if(l(i) > u(i)) bad++;
+  std::cout << "[DBG] " << name << " bounds size=" << l.size()
             << " l[min,max]=[" << l.minCoeff() << ", " << l.maxCoeff() << "]"
             << " u[min,max]=[" << u.minCoeff() << ", " << u.maxCoeff() << "]"
-            << " inversions(l>u)=" << bad
-            << "\n";
+            << " inversions(l>u)=" << bad << "\n";
 }
 
 void IDProblem::debugDumpSolveStep(const QPProblem* qp,
@@ -879,264 +781,122 @@ void IDProblem::debugDumpSolveStep(const QPProblem* qp,
   std::cout << std::boolalpha
             << "[DBG] qp_built=" << qp_built
             << " qp_solved=" << qp_solved
-            << " torque_ok=" << torque_ok
-            << "\n";
+            << " torque_ok=" << torque_ok << "\n";
 
-  // --- robot state
-  if(debug_mask_ & DBG_STATE)
-  {
-    Eigen::VectorXd q, qd;
-    q.setZero(model_->getJointNum());
-    qd.setZero(model_->getJointNum());
-
-    bool okq = model_->getJointPosition(q);
-    bool okd = model_->getJointVelocity(qd);
-
-    std::cout << "[DBG] state: getJointPosition=" << okq
-              << " getJointVelocity=" << okd << "\n";
+  // State
+  if(debug_mask_ & DBG_STATE) {
+    Eigen::VectorXd q(model_->getJointNum()), qd(model_->getJointNum());
+    q.setZero(); qd.setZero();
+    const bool okq = model_->getJointPosition(q);
+    const bool okd = model_->getJointVelocity(qd);
+    std::cout << "[DBG] state: getJointPosition=" << okq << " getJointVelocity=" << okd << "\n";
     if(okq) debugPrintVecStats("q", q);
     if(okd) debugPrintVecStats("qd", qd);
-
-    std::cout << "[DBG] regularization_value="<<regularization_value_ <<"\n";
+    std::cout << "[DBG] regularization_value="<<regularization_value_<<"\n";
     std::cout << "[DBG] min_forces_weight="<<min_forces_weight_<<"\n";
     std::cout << "[DBG] min_qddot_weight="<<min_qddot_weight_<<"\n";
   }
 
-  // --- qp bounds & constraints
-  if((debug_mask_ & DBG_QP_BOUNDS) && qp)
-  {
+  // QP
+  if((debug_mask_ & DBG_QP_BOUNDS) && qp) {
     std::cout << "[DBG] QP: n=" << qp->n() << " m=" << qp->m() << "\n";
     debugPrintMatStats("H", qp->H);
     debugPrintVecStats("g", qp->g);
-
     debugPrintBoundsStats("var_bounds(l/u)", qp->l, qp->u);
-
     if(qp->A.rows() > 0) {
       debugPrintMatStats("A", qp->A);
       debugPrintBoundsStats("lin_bounds(lA/uA)", qp->lA, qp->uA);
     } else {
       std::cout << "[DBG] linear constraints: none\n";
     }
-
-    int tight = 0;
-    if(x && x->size() == qp->n()) {
-      for(int i = 0; i < qp->n(); ++i) {
-        const double xi = (*x)(i);
-        const double dl = std::abs(xi - qp->l(i));
-        const double du = std::abs(qp->u(i) - xi);
-        if(dl < 1e-6 || du < 1e-6) tight++;
-      }
-      std::cout << "[DBG] tight var bounds count ~ " << tight << "/" << qp->n() << "\n";
-    }
   }
 
-  // --- solution
-  if((debug_mask_ & DBG_SOLUTION) && x)
-  {
+  // Solution x blocks
+  if((debug_mask_ & DBG_SOLUTION) && x && vars_) {
     debugPrintVecStats("x", *x);
-
     try {
       const auto& qb = vars_->qddotBlock();
       if(qb.dim > 0 && qb.offset + qb.dim <= x->size()) {
-        Eigen::VectorXd x_qdd = x->segment(qb.offset, qb.dim);
+        const Eigen::VectorXd x_qdd = x->segment(qb.offset, qb.dim);
         debugPrintVecStats("x[qddot_block]", x_qdd);
+        if(x_qdd.size() >= 6) std::cout << "[DBG] qddot_base = " << x_qdd.head<6>().transpose() << "\n";
       }
-
-      Eigen::VectorXd qdd = x->segment(qb.offset, qb.dim);
-      std::cout << "[DBG] qddot_base = " << qdd.head<6>().transpose() << "\n";
-
       for(const auto& fn : foot_names_) {
         const auto& cb = vars_->contactBlock(fn);
         if(cb.dim > 0 && cb.offset + cb.dim <= x->size()) {
-          Eigen::VectorXd x_f = x->segment(cb.offset, cb.dim);
+          const Eigen::VectorXd x_f = x->segment(cb.offset, cb.dim);
           debugPrintVecStats("x[contact:" + fn + "]", x_f);
         }
       }
-    }
-    catch(...) {
+    } catch(...) {
       std::cout << "[DBG] (note) could not print x blocks (vars_ API mismatch)\n";
-    }
-
-    // dynamics residual (assumes last 6 rows are dynamics equality; keep as your debug)
-    if(qp && qp->m() >= 6) {
-      int m = qp->m();
-      Eigen::MatrixXd A_dyn = qp->A.block(m-6, 0, 6, qp->n());
-      Eigen::VectorXd l_dyn = qp->lA.segment(m-6, 6);
-      Eigen::VectorXd r_qp  = A_dyn * (*x) - l_dyn;
-
-      std::cout << "[DBG] dyn_qp_residual = " << r_qp.transpose()
-                << " |r|=" << r_qp.norm() << "\n";
     }
   }
 
-  // --- tau
-  if((debug_mask_ & DBG_TAU) && tau)
-  {
+  // Tau
+  if((debug_mask_ & DBG_TAU) && tau) {
     debugPrintVecStats("tau", *tau);
     const int N = std::min<int>(tau->size(), 16);
     std::cout << "[DBG] tau head(" << N << ") = " << tau->head(N).transpose() << "\n";
   }
 
-  // --- contacts
-  if(debug_mask_ & DBG_CONTACTS)
-  {
+  // Contacts
+  if(debug_mask_ & DBG_CONTACTS) {
     if(!contact_wrenches_.empty()) {
       double fz_sum = 0.0;
       for(size_t i = 0; i < contact_wrenches_.size(); ++i) {
         const auto& w = contact_wrenches_[i];
         const double fx = w(0), fy = w(1), fz = w(2);
         fz_sum += fz;
-        std::cout << "[DBG] wrench[" << i << "] "
-                  << "fx=" << fx << " fy=" << fy << " fz=" << fz
-                  << " |f|=" << w.head<3>().norm()
-                  << "\n";
+        std::cout << "[DBG] wrench[" << i << "] fx=" << fx << " fy=" << fy << " fz=" << fz
+                  << " |f|=" << w.head<3>().norm() << "\n";
       }
       const double weight = model_->getMass() * GRAVITY;
       std::cout << "[DBG] fz_sum=" << fz_sum << " vs weight=" << weight
-                << " ratio=" << (weight > 1e-9 ? (fz_sum / weight) : 0.0)
-                << "\n";
+                << " ratio=" << (weight > 1e-9 ? (fz_sum / weight) : 0.0) << "\n";
     } else {
-      std::cout << "[DBG] contact_wrenches_: empty (maybe not computed yet)\n";
+      std::cout << "[DBG] contact_wrenches_: empty\n";
     }
   }
 
-  // --- tasks snapshot
-  if(debug_mask_ & DBG_TASKS)
-  {
-
-    auto print_task = [&](const std::string& name, const auto& task){
+  // Tasks snapshot
+  if(debug_mask_ & DBG_TASKS) {
+    auto print_task = [&](const std::string& name, const auto& task) {
       std::cout << "[DBG] task: " << name << "\n";
-      debugPrintMatStats("  A", task.A());
-      debugPrintVecStats("  b", task.b());
-      debugPrintMatStats("  W", task.W());
-      std::cout << "[DBG]   b=" << task.b().transpose() << "\n";
-      std::cout << "[DBG]   W diag=" << task.W().diagonal().transpose() << "\n";
+      debugPrintMatStats(" A", task.A());
+      debugPrintVecStats(" b", task.b());
+      debugPrintVecStats(" wDiag", task.wDiag());
 
-      auto print_diag = [&](const std::string& tag, const Eigen::MatrixXd& M){
-        if(M.size() == 0) {
-          std::cout << "[DBG]   " << tag << " <empty>\n";
-          return;
-        }
-        if(M.rows() != M.cols()) {
-          std::cout << "[DBG]   " << tag << " (" << M.rows() << "x" << M.cols()
-                    << ") not square, head=" << M.topLeftCorner(std::min(3,(int)M.rows()),
-                                                              std::min(3,(int)M.cols()))
-                    << "\n";
-          return;
-        }
-        std::cout << "[DBG]   " << tag << " diag=" << M.diagonal().transpose() << "\n";
-      };
-
+      // gains if present
       try {
-        if(const auto* cart = dynamic_cast<const CartesianImpl*>(&task)) {
-          const auto Kp = cart->getKp();
-          const auto Kd = cart->getKd();
-          print_diag("cartesian Kp", Kp);
-          print_diag("cartesian Kd", Kd);
-          std::cout << "[DBG]   cartesian gain_type=" << static_cast<int>(cart->getGainType()) << "\n";
-        }
-        else if(const auto* com = dynamic_cast<const ComImpl*>(&task)) {
-          const auto Kp = com->getKp();
-          const auto Kd = com->getKd();
-          print_diag("com Kp", Kp);
-          print_diag("com Kd", Kd);
-        }
-        else if(const auto* post = dynamic_cast<const PosturalImpl*>(&task)) {
-          const auto Kp = post->getKp();
-          const auto Kd = post->getKd();
-          print_diag("postural Kp", Kp);
-          print_diag("postural Kd", Kd);
-        }
-        else if(const auto* mom = dynamic_cast<const AngularMomentumImpl*>(&task)) {
-          const auto Kg = mom->getMomentumGain();
-          print_diag("momentum_gain", Kg);
-        }
-      } catch(...) {
-        std::cout << "[DBG]   (note) gains print failed for " << name << "\n";
-      }
+        const auto Kp = task.getKp();
+        const auto Kd = task.getKd();
+        if(Kp.size() > 0) std::cout << "[DBG] Kp diag=" << Kp.diagonal().transpose() << "\n";
+        if(Kd.size() > 0) std::cout << "[DBG] Kd diag=" << Kd.diagonal().transpose() << "\n";
+      } catch(...) {}
     };
 
     try {
-      for(const auto& kv : feet_) print_task("foot:" + kv.first, *kv.second);
-      for(const auto& kv : arms_) print_task("arm:" + kv.first, *kv.second);
+      for(const auto& kv : feet_)     print_task("foot:" + kv.first, *kv.second);
+      for(const auto& kv : arms_)     print_task("arm:"  + kv.first, *kv.second);
+      for(const auto& kv : wrenches_) print_task("wrench:" + kv.first, *kv.second);
       print_task("waist", *waist_);
       print_task("com", *com_);
-
-      // -------------------- EXTRA COM DEBUG (model-side + task-side) --------------------
-      try {
-        Eigen::Vector3d com_p, com_v, jdotqdot;
-        Eigen::MatrixXd Jcom;
-
-        model_->getCOM(com_p);
-        model_->getCOMVelocity(com_v);
-        model_->getCOMJacobian(Jcom, jdotqdot); // Jcom: 3 x ndof (o joint num del model)
-
-        std::cout << "[DBG]   [COM_DBG] model COM pos   = " << com_p.transpose() << "\n";
-        std::cout << "[DBG]   [COM_DBG] model COM vel   = " << com_v.transpose() << "\n";
-        std::cout << "[DBG]   [COM_DBG] model dJcomQdot = " << jdotqdot.transpose() << "\n";
-
-        // Some quick stats on Jcom
-        if(Jcom.size() > 0) {
-          std::cout << "[DBG]   [COM_DBG] Jcom rows=" << Jcom.rows()
-                    << " cols=" << Jcom.cols()
-                    << " fro_norm=" << Jcom.norm()
-                    << "\n";
-        } else {
-          std::cout << "[DBG]   [COM_DBG] Jcom: <empty>\n";
-        }
-
-        // Task-side: infer "desired accel" y = b + dJcomQdot (since your task builds b = y - dJdq)
-        {
-          const Eigen::Vector3d b_task = com_->b();  // should be size 3
-          std::cout << "[DBG]   [COM_DBG] task b         = " << b_task.transpose() << "\n";
-          std::cout << "[DBG]   [COM_DBG] y_est (=b+dJq) = " << (b_task + jdotqdot).transpose() << "\n";
-        }
-
-        // If solution x is available, compute actual com acceleration implied by solution:
-        if(x && x->size() == vars_->size()) {
-          const Eigen::VectorXd qdd = vars_->qddot(*x);
-
-          // Protect against dimension mismatch between Jcom and qdd
-          if(Jcom.cols() == qdd.size()) {
-            Eigen::Vector3d com_acc = Jcom * qdd + jdotqdot;
-            std::cout << "[DBG]   [COM_DBG] com_acc (J*qdd + dJq) = "
-                      << com_acc.transpose() << "\n";
-          } else {
-            std::cout << "[DBG]   [COM_DBG] cannot compute com_acc: Jcom.cols("
-                      << Jcom.cols() << ") != qdd.size(" << qdd.size() << ")\n";
-          }
-
-          // Also print base part of qddot just for correlation
-          if(qdd.size() >= 6) {
-            std::cout << "[DBG]   [COM_DBG] qddot_base (from x) = "
-                      << qdd.head<6>().transpose() << "\n";
-          }
-        }
-
-      } catch(...) {
-        std::cout << "[DBG]   [COM_DBG] (note) failed to compute model-side COM debug\n";
-      }
-      // ---------------------------------------------------------------------------------
-
       print_task("postural", *postural_);
       print_task("angular_momentum", *angular_momentum_);
-    }
-    catch(...) {
-      std::cout << "[DBG] (note) task snapshot failed (API mismatch?)\n";
+    } catch(...) {
+      std::cout << "[DBG] (note) task snapshot failed\n";
     }
   }
 
-  if((debug_mask_ & DBG_CONSTRAINTS) && qp)
-  {
+  if((debug_mask_ & DBG_CONSTRAINTS) && qp) {
     std::cout << "[DBG] constraints list (" << constraints_.size() << ")\n";
-    for(const auto& c : constraints_)
-    {
+    for(const auto& c : constraints_) {
       if(!c) continue;
-      std::cout << "[DBG]   c=" << c->name()
+      std::cout << "[DBG] c=" << c->name()
                 << " enabled=" << c->enabled()
                 << " rows=" << c->rows()
-                << " cols=" << c->cols()
-                << "\n";
+                << " cols=" << c->cols() << "\n";
     }
   }
 

@@ -1,135 +1,84 @@
-/**
-WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
-*/
-
+#pragma once
 #ifndef WOLF_WBID_COM_TASK_H
 #define WOLF_WBID_COM_TASK_H
 
-#include <Eigen/Core>
 #include <Eigen/Dense>
-#include <memory>
 #include <string>
+
+#include <wolf_wbid/wbid/tasks/task_base.h>
+#include <wolf_wbid/wbid/id_variables.h>
 
 namespace wolf_wbid {
 
 class QuadrupedRobot;
-class IDVariables;
 
-class ComTask
+/**
+ * @brief CoM acceleration task (3D):
+ *
+ * Model:
+ *   pdd_com = Jcom * qddot + Jdotcom*qd
+ *
+ * LSQ:
+ *   A = [Jcom, 0]
+ *   b = pdd_des - Jdotcom*qd
+ *
+ * pdd_des = Kp*(p_ref - p) + Kd*(v_ref - v)
+ */
+class ComTask : public TaskBase
 {
 public:
-  using Ptr = std::shared_ptr<ComTask>;
-
   ComTask(const std::string& task_id,
           QuadrupedRobot& robot,
           const IDVariables& vars);
 
-  virtual ~ComTask() = default;
+  const std::string& getBaseLink() const { return base_link_; }
+  void setBaseLink(const std::string& base) { base_link_ = base; } // kept for msg frame compat
 
-  // --- Update ---
-  void update(const Eigen::VectorXd& x);
+  // reference API
+  void setReference(const Eigen::Vector3d& p_ref, const Eigen::Vector3d& v_ref);
+  void getReference(Eigen::Vector3d& p_ref_out) const { p_ref_out = p_ref_; }
+  const Eigen::Vector3d& getCachedVelocityReference() const { return v_ref_; }
 
-  // --- Task form: minimize || A x - b ||_W ---
-  const Eigen::MatrixXd& A() const { return A_; }
-  const Eigen::VectorXd& b() const { return b_; }
-  const Eigen::Matrix3d& W() const { return W_; }
+  // actual getters used by wrappers
+  void getActualPose(Eigen::Vector3d& p_act_out) const { p_act_out = p_act_; }
+  void getActualVelocity(Eigen::Vector3d& v_act_out) const { v_act_out = v_act_; }
 
-  // --- Metadata ---
-  const std::string& getTaskID() const { return task_id_; }
-  const std::string& getBaseLink() const { return base_link_; }      // kept for ROS msgs compatibility
-  const std::string& getDistalLink() const { return distal_link_; }  // "CoM"
+  const Eigen::Vector3d& posError() const { return e_p_; }
+  const Eigen::Vector3d& velError() const { return e_v_; }
 
-  // --- References ---
-  void setReference(const Eigen::Vector3d& pos_ref);
-  void setReference(const Eigen::Vector3d& pos_ref,
-                    const Eigen::Vector3d& vel_ref);
-  void setReference(const Eigen::Vector3d& pos_ref,
-                    const Eigen::Vector3d& vel_ref,
-                    const Eigen::Vector3d& acc_ref);
+  void update(const Eigen::VectorXd& x) override;
+  bool reset() override;
 
-  void getReference(Eigen::Vector3d& pos_ref) const { pos_ref = pos_ref_; }
-  void getReference(Eigen::Vector3d& pos_ref, Eigen::Vector3d& vel_ref) const
-  {
-    pos_ref = pos_ref_;
-    vel_ref = vel_ref_;
-  }
+  // 3x3 gains helpers
+  void setKp(const Eigen::Matrix3d& Kp3) { TaskBase::setKp(Kp3); }
+  void setKd(const Eigen::Matrix3d& Kd3) { TaskBase::setKd(Kd3); }
 
-  const Eigen::Vector3d& getCachedVelocityReference() const { return vel_ref_cached_; }
-  const Eigen::Vector3d& getCachedAccelerationReference() const { return acc_ref_cached_; }
-
-  // --- Actuals (valid after update) ---
-  void getActualPose(Eigen::Vector3d& pos) const { pos = pos_current_; }
-  void getActualVelocity(Eigen::Vector3d& vel) const { vel = vel_current_; }
-
-  // --- Errors (valid after update) ---
-  const Eigen::Vector3d& getPosError() const { return pos_error_; }
-  const Eigen::Vector3d& getVelError() const { return vel_error_; }
-
-  // --- Gains ---
-  void setLambda(double lambda);
-  void setLambda(double lambda1, double lambda2);
-  double getLambda() const { return lambda1_; }
-  double getLambda2() const { return lambda2_; }
-
-  void setKp(const Eigen::Matrix3d& Kp) { Kp_ = Kp; }
-  void setKd(const Eigen::Matrix3d& Kd) { Kd_ = Kd; }
-  const Eigen::Matrix3d& getKp() const { return Kp_; }
-  const Eigen::Matrix3d& getKd() const { return Kd_; }
-
-  void setGains(const Eigen::Matrix3d& Kp, const Eigen::Matrix3d& Kd)
-  {
-    Kp_ = Kp;
-    Kd_ = Kd;
-  }
-
-  // --- Weight ---
-  void setWeight(const Eigen::Matrix3d& W) { W_ = W; }
-  const Eigen::Matrix3d& getWeight() const { return W_; }
-
-  // --- Reset ---
-  virtual bool reset();
+protected:
+  // adapt to your QuadrupedRobot API
+  virtual void getCOM(Eigen::Vector3d& p_W) const;
+  virtual void getCOMVelocity(Eigen::Vector3d& v_W) const;
+  virtual void getCOMJacobian(Eigen::MatrixXd& Jcom) const;
+  virtual void getCOMJacobianDotTimesQdot(Eigen::Vector3d& Jdot_qdot) const;
 
 private:
-  void resetReference();
-
-  std::string task_id_;
   QuadrupedRobot& robot_;
   const IDVariables& vars_;
 
-  // For compatibility with your ROS msgs / old wrappers
-  std::string distal_link_{"CoM"};
-  std::string base_link_{"world"};
+  std::string base_link_{WORLD_FRAME_NAME};
 
-  // Jacobian terms
-  Eigen::MatrixXd Jcom_;              // 3 x nvars_q (same dofs as robot_)
-  Eigen::Vector3d dJcomQdot_;         // 3
+  IDVariables::Block qb_;
 
-  // reference/current
-  Eigen::Vector3d pos_ref_{Eigen::Vector3d::Zero()};
-  Eigen::Vector3d pos_current_{Eigen::Vector3d::Zero()};
+  // reference
+  Eigen::Vector3d p_ref_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d v_ref_{Eigen::Vector3d::Zero()};
 
-  Eigen::Vector3d vel_ref_{Eigen::Vector3d::Zero()};
-  Eigen::Vector3d acc_ref_{Eigen::Vector3d::Zero()};
-  Eigen::Vector3d vel_ref_cached_{Eigen::Vector3d::Zero()};
-  Eigen::Vector3d acc_ref_cached_{Eigen::Vector3d::Zero()};
+  // actual
+  Eigen::Vector3d p_act_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d v_act_{Eigen::Vector3d::Zero()};
 
   // errors
-  Eigen::Vector3d pos_error_{Eigen::Vector3d::Zero()};
-  Eigen::Vector3d vel_current_{Eigen::Vector3d::Zero()};
-  Eigen::Vector3d vel_error_{Eigen::Vector3d::Zero()};
-
-  // gains
-  double lambda1_{100.0};
-  double lambda2_{2.0 * std::sqrt(100.0)};
-  Eigen::Matrix3d Kp_{Eigen::Matrix3d::Identity()};
-  Eigen::Matrix3d Kd_{Eigen::Matrix3d::Identity()};
-
-  // weight
-  Eigen::Matrix3d W_{Eigen::Matrix3d::Identity()};
-
-  // task matrices (A x ~= b)
-  Eigen::MatrixXd A_; // 3 x dim(x)
-  Eigen::VectorXd b_; // 3
+  Eigen::Vector3d e_p_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d e_v_{Eigen::Vector3d::Zero()};
 };
 
 } // namespace wolf_wbid

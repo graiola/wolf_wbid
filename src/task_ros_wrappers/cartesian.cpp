@@ -122,7 +122,7 @@ void CartesianImpl::loadParams()
 
   Eigen::Matrix<double,6,6> W = Eigen::Matrix<double,6,6>::Identity();
   W.diagonal().setConstant(weight);
-  setWeight(W);
+  setWeight(Eigen::MatrixXd(W));
 
   Eigen::Matrix<double,6,6> Kp = Eigen::Matrix<double,6,6>::Zero();
   Eigen::Matrix<double,6,6> Kd = Eigen::Matrix<double,6,6>::Zero();
@@ -186,7 +186,7 @@ void CartesianImpl::applyExternalKnobs()
   {
     Eigen::Matrix<double,6,6> W = Eigen::Matrix<double,6,6>::Identity();
     W.diagonal().setConstant(buffer_weight_diag_.load());
-    setWeight(W);
+    setWeight(Eigen::MatrixXd(W));
   }
 
   if(OPTIONS.set_ext_gains)

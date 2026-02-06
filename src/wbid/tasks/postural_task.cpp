@@ -1,212 +1,166 @@
 #include <wolf_wbid/wbid/tasks/postural_task.h>
+#include <wolf_wbid/quadruped_robot.h>
+
+#include <stdexcept>
 
 namespace wolf_wbid {
 
-static void _check_size(const Eigen::VectorXd& v, int n, const std::string& what)
-{
-  if(v.size() != n)
-    throw std::runtime_error(what + " has wrong size: " + std::to_string(v.size()) +
-                             " expected " + std::to_string(n));
-}
-
 PosturalTask::PosturalTask(const std::string& task_id,
-                           QuadrupedRobot& model,
-                           const IDVariables& idvars,
-                           double period)
-: task_id_(task_id)
-, model_(model)
-, idvars_(idvars)
-, period_(period)
+                           QuadrupedRobot& robot,
+                           const IDVariables& vars)
+: TaskBase(task_id)
+, robot_(robot)
+, vars_(vars)
 {
-  if(period_ <= 0.0) throw std::runtime_error("PosturalTask: period must be > 0");
+  qb_ = vars_.qddotBlock();
+  n_ = qb_.dim;
 
-  task_size_ = model_.getJointNum();
-  x_size_    = idvars_.size();
+  if(n_ <= 0) throw std::runtime_error("PosturalTask: invalid qddot dim");
 
-  joint_names_ = model_.getJointNames();
+  // LSQ: nj rows, nvars cols
+  resize(n_, vars_.size());
 
-  // allocate vectors
-  q_.setZero(task_size_);
-  qdot_.setZero(task_size_);
-  qref_.setZero(task_size_);
-  qdot_ref_.setZero(task_size_);
-  qddot_ref_.setZero(task_size_);
-  qdot_ref_cached_.setZero(task_size_);
-  qddot_ref_cached_.setZero(task_size_);
+  // A = [I, 0] on qddot block
+  A_.setZero();
+  A_.block(0, qb_.offset, n_, n_).setIdentity();
 
-  position_error_.setZero(task_size_);
-  velocity_error_.setZero(task_size_);
-  qddot_d_.setZero(task_size_);
+  joint_names_ = getJointNames();
 
-  // gains
-  Kp_.setIdentity(task_size_, task_size_);
-  Kd_.setIdentity(task_size_, task_size_);
+  q_act_.setZero(n_);
+  qd_act_.setZero(n_);
+  q_ref_.setZero(n_);
+  qd_ref_.setZero(n_);
+  e_q_.setZero(n_);
+  e_qd_.setZero(n_);
 
-  // task matrices
-  buildSelectionMatrix();
-  b_.setZero(task_size_);
-  setWeightDiag(weight_diag_);
-
-  // initialize reference to current posture if possible
-  reset();
-}
-
-void PosturalTask::buildSelectionMatrix()
-{
-  // A selects qddot block from x: A x = qddot
-  // A is (nq x x_size) with I on qddot offset
-  A_.setZero(task_size_, x_size_);
-
-  const int off = 0; // in your IDVariables implementation qddot is first, offset 0.
-  // If in future it changes, use idvars_.qddotOffset() accessor.
-  if(off + task_size_ > x_size_)
-    throw std::runtime_error("PosturalTask: invalid qddot block layout");
-
-  A_.block(0, off, task_size_, task_size_) = Eigen::MatrixXd::Identity(task_size_, task_size_);
+  // default gains
+  TaskBase::setKp(Eigen::MatrixXd::Identity(n_, n_));
+  TaskBase::setKd(Eigen::MatrixXd::Identity(n_, n_));
 }
 
 void PosturalTask::setWeightDiag(double w)
 {
-  if(w < 0.0) throw std::runtime_error("PosturalTask: weight must be >= 0");
-  weight_diag_ = w;
-  W_.setIdentity(task_size_, task_size_);
-  W_ *= weight_diag_;
+  if(!std::isfinite(w) || w < 0.0)
+    throw std::runtime_error("PosturalTask::setWeightDiag(): invalid weight");
+
+  // constant row weights = w
+  Eigen::VectorXd wd = Eigen::VectorXd::Constant(n_, 1.0);
+  TaskBase::setWeight(wd);       // user weights
+  TaskBase::setWeightScalar(w);  // scalar multiplier
 }
 
-void PosturalTask::setLambda(double lambda1)
+void PosturalTask::setReference(const Eigen::VectorXd& q_ref)
 {
-  if(lambda1 < 0.0) throw std::runtime_error("PosturalTask: lambda1 must be >= 0");
-  lambda1_ = lambda1;
-  lambda2_ = 2.0 * std::sqrt(std::max(0.0, lambda1_));
+  if(q_ref.size() != n_)
+    throw std::runtime_error("PosturalTask::setReference(q): size mismatch");
+  q_ref_ = q_ref;
 }
 
-void PosturalTask::setLambda(double lambda1, double lambda2)
+void PosturalTask::setReference(const Eigen::VectorXd& q_ref, const Eigen::VectorXd& qd_ref)
 {
-  if(lambda1 < 0.0 || lambda2 < 0.0)
-    throw std::runtime_error("PosturalTask: lambdas must be >= 0");
-  lambda1_ = lambda1;
-  lambda2_ = lambda2;
-}
-
-void PosturalTask::setKp(const Eigen::MatrixXd& Kp)
-{
-  if(Kp.rows() != task_size_ || Kp.cols() != task_size_)
-    throw std::runtime_error("PosturalTask: Kp wrong size");
-  Kp_ = Kp;
-}
-
-void PosturalTask::setKd(const Eigen::MatrixXd& Kd)
-{
-  if(Kd.rows() != task_size_ || Kd.cols() != task_size_)
-    throw std::runtime_error("PosturalTask: Kd wrong size");
-  Kd_ = Kd;
+  setReference(q_ref);
+  if(qd_ref.size() != n_)
+    throw std::runtime_error("PosturalTask::setReference(q,qd): qd size mismatch");
+  qd_ref_ = qd_ref;
 }
 
 void PosturalTask::setGains(const Eigen::MatrixXd& Kp, const Eigen::MatrixXd& Kd)
 {
-  setKp(Kp);
-  setKd(Kd);
+  if(Kp.rows() != n_ || Kp.cols() != n_ || Kd.rows() != n_ || Kd.cols() != n_)
+    throw std::runtime_error("PosturalTask::setGains(): size mismatch");
+  TaskBase::setKp(Kp);
+  TaskBase::setKd(Kd);
 }
 
-void PosturalTask::setReference(const Eigen::VectorXd& qref)
+// ---- QuadrupedRobot adapters (adjust if needed) ----
+void PosturalTask::getJointPosition(Eigen::VectorXd& q) const
 {
-  _check_size(qref, task_size_, "PosturalTask::setReference(qref)");
-  qref_ = qref;
-  qdot_ref_.setZero(task_size_);
-  qddot_ref_.setZero(task_size_);
-  qdot_ref_cached_ = qdot_ref_;
-  qddot_ref_cached_ = qddot_ref_;
+  q.resize(robot_.getJointNum());
+  robot_.getJointPosition(q);
+}
+void PosturalTask::getJointVelocity(Eigen::VectorXd& qd) const
+{
+  qd.resize(robot_.getJointNum());
+  robot_.getJointVelocity(qd);
+}
+std::vector<std::string> PosturalTask::getJointNames() const
+{
+  return robot_.getJointNames();
+}
+// ---------------------------------------------------
+
+void PosturalTask::update(const Eigen::VectorXd& /*x*/)
+{
+  if(!enabled()) {
+    b_.setZero();
+    return;
+  }
+
+  // Read current joint state
+  getJointPosition(q_act_);
+  getJointVelocity(qd_act_);
+
+  if(q_act_.size() != n_ || qd_act_.size() != n_)
+    throw std::runtime_error("PosturalTask::update(): joint state size mismatch");
+
+  // Errors
+  e_q_  = q_ref_  - q_act_;
+  e_qd_ = qd_ref_ - qd_act_;
+
+  if(getKp().rows() != n_ || getKp().cols() != n_ ||
+     getKd().rows() != n_ || getKd().cols() != n_)
+    throw std::runtime_error("PosturalTask::update(): Kp/Kd size mismatch");
+
+  // One-shot acceleration feedforward was present in the old stack; if you don't expose it
+  // in the new API, keep it as zero here.
+  const Eigen::VectorXd qdd_ref = Eigen::VectorXd::Zero(n_);
+
+  // PD term (in joint space)
+  const Eigen::VectorXd pd_term =
+      getKd() * e_qd_ + getKp() * e_q_;
+
+  Eigen::VectorXd qdd_des(n_);
+  if(getGainType() == GainType::Acceleration)
+  {
+    // Acceleration-mode gains: directly shape desired joint acceleration.
+    qdd_des = qdd_ref + pd_term;
+  }
+  else
+  {
+    // Force-mode gains: map the PD term through inverse inertia (as in the old implementation).
+    Eigen::MatrixXd Mi;
+    robot_.getInertiaInverse(Mi);
+    if(Mi.rows() != n_ || Mi.cols() != n_)
+      throw std::runtime_error("PosturalTask::update(): inertia inverse size mismatch");
+
+    qdd_des = qdd_ref + Mi * pd_term;
+  }
+
+  // Task: qddot ~= qdd_des  ->  A x = b with A selecting qddot block
+  b_ = qdd_des;
+
+  // OpenSoT-like: if you want "one-shot" velocity reference, reset it here.
+  // (Keep/remove depending on how your wrapper uses qd_ref_.)
+  // qd_ref_.setZero(n_);
 }
 
-void PosturalTask::setReference(const Eigen::VectorXd& qref, const Eigen::VectorXd& qdot_ref)
-{
-  _check_size(qref, task_size_, "PosturalTask::setReference(qref,qdot)");
-  _check_size(qdot_ref, task_size_, "PosturalTask::setReference(qref,qdot)");
-  qref_ = qref;
-  qdot_ref_ = qdot_ref;
-  qddot_ref_.setZero(task_size_);
-  qdot_ref_cached_ = qdot_ref_;
-  qddot_ref_cached_ = qddot_ref_;
-}
 
-void PosturalTask::setReference(const Eigen::VectorXd& qref,
-                                const Eigen::VectorXd& qdot_ref,
-                                const Eigen::VectorXd& qddot_ref)
+double PosturalTask::computeCost(const Eigen::VectorXd& x) const
 {
-  _check_size(qref, task_size_, "PosturalTask::setReference(qref,qdot,qddot)");
-  _check_size(qdot_ref, task_size_, "PosturalTask::setReference(qref,qdot,qddot)");
-  _check_size(qddot_ref, task_size_, "PosturalTask::setReference(qref,qdot,qddot)");
-  qref_ = qref;
-  qdot_ref_ = qdot_ref;
-  qddot_ref_ = qddot_ref;
-  qdot_ref_cached_ = qdot_ref_;
-  qddot_ref_cached_ = qddot_ref_;
+  // generic LSQ cost: 0.5 (Ax-b)' W (Ax-b) with W = diag(wDiag)
+  if(x.size() != cols()) return 0.0;
+  const Eigen::VectorXd r = A_ * x - b_;
+  const Eigen::VectorXd wd = wDiag();
+  if(wd.size() != r.size()) return 0.0;
+  return 0.5 * (r.array().square() * wd.array()).sum();
 }
 
 bool PosturalTask::reset()
 {
-  // set qref = current q
-  model_.getJointPosition(q_);
-  model_.getJointVelocity(qdot_);
-  qref_ = q_;
-  qdot_ref_.setZero(task_size_);
-  qddot_ref_.setZero(task_size_);
-  qdot_ref_cached_ = qdot_ref_;
-  qddot_ref_cached_ = qddot_ref_;
+  // reference := current q
+  getJointPosition(q_ref_);
+  qd_ref_.setZero(n_);
   return true;
-}
-
-void PosturalTask::update(const Eigen::VectorXd& x)
-{
-  _update(x);
-  cost_last_ = computeCost(x);
-}
-
-void PosturalTask::_update(const Eigen::VectorXd& x)
-{
-  (void)x;
-
-  // cache refs (published)
-  qdot_ref_cached_  = qdot_ref_;
-  qddot_ref_cached_ = qddot_ref_;
-
-  // read state
-  model_.getJointPosition(q_);
-  model_.getJointVelocity(qdot_);
-
-  // errors
-  position_error_ = (qref_ - q_);
-  velocity_error_ = (qdot_ref_ - qdot_);
-
-  // desired qddot
-  if(gain_type_ == GainType::Acceleration)
-  {
-    qddot_d_ = qddot_ref_ + lambda2_ * (Kd_ * velocity_error_) + lambda1_ * (Kp_ * position_error_);
-  }
-  else // GainType::Force
-  {
-    model_.getInertiaInverse(Mi_);
-    if(Mi_.rows() != task_size_ || Mi_.cols() != task_size_)
-      throw std::runtime_error("PosturalTask: Mi wrong size from model.getInertiaInverse()");
-    const Eigen::VectorXd tmp = lambda2_ * (Kd_ * velocity_error_) + lambda1_ * (Kp_ * position_error_);
-    qddot_d_ = qddot_ref_ + Mi_ * tmp;
-  }
-
-  // Build b so that Ax - b = qddot - qddot_d
-  b_ = qddot_d_;
-
-  // reset one-shot refs like OpenSoT
-  qdot_ref_.setZero(task_size_);
-  qddot_ref_.setZero(task_size_);
-}
-
-double PosturalTask::computeCost(const Eigen::VectorXd& x) const
-{
-  if(x.size() != x_size_) return 0.0;
-
-  const Eigen::VectorXd r = (A_ * x) - b_;        // qddot - qddot_d
-  const double c = 0.5 * r.transpose() * W_ * r;
-  return c;
 }
 
 } // namespace wolf_wbid

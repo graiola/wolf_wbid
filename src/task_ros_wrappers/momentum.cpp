@@ -12,11 +12,11 @@
 namespace wolf_wbid {
 
 AngularMomentumImpl::AngularMomentumImpl(const std::string& robot_name,
+                                         const std::string& task_id,
                                          QuadrupedRobot& robot,
                                          const IDVariables& vars,
-                                         const std::string& task_id,
                                          const double& period)
-  : AngularMomentum(robot_name, robot, vars, task_id, period)
+  : AngularMomentum(robot_name, task_id, robot, vars, period)
   , TaskRosHandler<wolf_msgs::CartesianTask>(task_id, robot_name, period)
 {
   // nothing else: no subscribers, no buffers, etc.
@@ -64,7 +64,8 @@ void AngularMomentumImpl::loadParams()
 
   // push immediately (startup)
   setLambda(lambda1);
-  setWeight(Eigen::Matrix3d::Identity() * weight);
+  Eigen::VectorXd w = Eigen::VectorXd::Constant(3, weight);
+  setWeight(w);
 
   // Momentum gain K (diag)
   Eigen::Matrix3d K = Eigen::Matrix3d::Zero();
@@ -97,8 +98,9 @@ void AngularMomentumImpl::applyExternalKnobs()
 
   if(OPTIONS.set_ext_weight)
   {
-    const double w = buffer_weight_diag_.load();
-    setWeight(Eigen::Matrix3d::Identity() * w);
+    const double value = buffer_weight_diag_.load();
+    Eigen::VectorXd w = Eigen::VectorXd::Constant(3, value);
+    setWeight(w);
   }
 
   if(OPTIONS.set_ext_gains)
@@ -120,7 +122,8 @@ void AngularMomentumImpl::applyExternalReference()
 void AngularMomentumImpl::updateCost(const Eigen::VectorXd& x)
 {
   const Eigen::VectorXd r = A() * x - b();
-  cost_ = 0.5 * (r.transpose() * W() * r)(0,0);
+  const Eigen::VectorXd wd = wDiag();
+  cost_ = 0.5 * (r.array().square() * wd.array()).sum();
 }
 
 void AngularMomentumImpl::publish()
@@ -129,7 +132,7 @@ void AngularMomentumImpl::publish()
 
   if(rt_pub_->trylock())
   {
-    rt_pub_->msg_.header.frame_id = getBaseLink();
+    rt_pub_->msg_.header.frame_id = WORLD_FRAME_NAME;
     rt_pub_->msg_.header.stamp = ros::Time::now();
 
     // Reuse CartesianTask message fields for angular momentum:

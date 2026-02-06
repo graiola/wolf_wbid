@@ -81,7 +81,8 @@ void ComImpl::loadParams()
 
   // push immediately (startup)
   setLambda(lambda1, lambda2);
-  setWeight(Eigen::Matrix3d::Identity() * weight);
+  Eigen::VectorXd w = Eigen::VectorXd::Constant(3, weight);
+  setWeight(w);
 
   Eigen::Matrix3d Kp = Eigen::Matrix3d::Zero();
   Eigen::Matrix3d Kd = Eigen::Matrix3d::Zero();
@@ -120,7 +121,10 @@ void ComImpl::applyExternalKnobs()
     setLambda(buffer_lambda1_.load(), buffer_lambda2_.load());
 
   if(OPTIONS.set_ext_weight)
-    setWeight(Eigen::Matrix3d::Identity() * buffer_weight_diag_.load());
+  {
+    Eigen::VectorXd w = Eigen::VectorXd::Constant(3, buffer_weight_diag_.load());
+    setWeight(w);
+  }
 
   if(OPTIONS.set_ext_gains)
   {
@@ -153,7 +157,8 @@ void ComImpl::updateCost(const Eigen::VectorXd& x)
 {
   // cost = 0.5 * (Ax-b)^T W (Ax-b)
   const Eigen::VectorXd r = A() * x - b();
-  cost_ = 0.5 * (r.transpose() * W() * r)(0,0);
+  const Eigen::VectorXd wd = wDiag(); // size = task rows
+  cost_ = 0.5 * (r.array().square() * wd.array()).sum();
 }
 
 void ComImpl::publish()

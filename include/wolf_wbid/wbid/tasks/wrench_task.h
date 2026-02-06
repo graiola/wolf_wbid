@@ -1,59 +1,56 @@
 #pragma once
+#ifndef WOLF_WBID_WRENCH_TASK_H
+#define WOLF_WBID_WRENCH_TASK_H
 
 #include <Eigen/Dense>
-#include <atomic>
 #include <string>
-#include <memory>
 
-#include <wolf_wbid/wbid/tasks/task_lsq.h>
+#include <wolf_wbid/wbid/tasks/task_base.h>
+#include <wolf_wbid/wbid/id_variables.h>
 
 namespace wolf_wbid {
 
-class IDVariables;
-
 /**
- * POINT_CONTACT ONLY (R^3): minimize || f_contact - f_ref ||_W
- * Decision variable block for this contact is (fx, fy, fz).
+ * @brief POINT_CONTACT wrench tracking task (force only).
  *
- * NOTE:
- *  - No ROS I/O here (handled by wrapper)
- *  - No thread-safety / mutex here (aligned with other tasks)
- *  - No caching of actual/cost here (wrapper can compute from solution)
+ * Variables block: f = [Fx,Fy,Fz] at contactBlock(contact_name).
+ * Residual: r = f - f_ref
+ * So:
+ *   A is (3 x nvars) selecting the contact force block
+ *   b is (3) equal to f_ref
+ * wDiag is (3) usually constant diag = weight
  */
-class WrenchTask : public ITaskLSQ
+class WrenchTask : public TaskBase
 {
 public:
-  using Ptr = std::shared_ptr<WrenchTask>;
+  WrenchTask(const std::string& task_id,
+             const std::string& contact_name,
+             const IDVariables& vars,
+             double weight_scalar = 1.0);
 
-  WrenchTask(std::string task_id,
-             std::string contact_name,
-             double weight = 1.0);
-
-  const std::string& getTaskID() const { return task_id_; }
   const std::string& contactName() const { return contact_name_; }
 
-  // Weight (diagonal, same scalar for x/y/z)
-  void setWeight(double w);
-  double weight() const { return weight_.load(); }
-
-  // Reference force (fx,fy,fz)
+  // reference API
   void setReference(const Eigen::Vector3d& f_ref);
   const Eigen::Vector3d& reference() const { return f_ref_; }
 
-  // ITaskLSQ
-  void compute(const IDVariables& vars, LsqTerm& out) override;
+  // scalar weight helper (legacy wrappers use this)
+  double weight() const { return getWeightScalar(); }
+  void setWeight(double w) { setWeightScalar(w); }
 
-  // Reset policy: by default reset ref to zero
-  virtual bool reset();
-
-  void update(const Eigen::VectorXd& x);
+  void update(const Eigen::VectorXd& x) override;
+  bool reset() override;
 
 private:
-  std::string task_id_;
   std::string contact_name_;
+  const IDVariables& vars_;
 
-  std::atomic<double> weight_{1.0};
   Eigen::Vector3d f_ref_{Eigen::Vector3d::Zero()};
+
+  // Cached block info
+  IDVariables::Block cb_;
 };
 
 } // namespace wolf_wbid
+
+#endif // WOLF_WBID_WRENCH_TASK_H

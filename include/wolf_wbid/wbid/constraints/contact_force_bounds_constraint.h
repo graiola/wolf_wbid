@@ -3,7 +3,7 @@
 #include <Eigen/Dense>
 #include <string>
 
-#include <wolf_wbid/wbid/constraint_base.h>
+#include <wolf_wbid/wbid/constraints/constraint_base.h>
 #include <wolf_wbid/wbid/id_variables.h>
 
 namespace wolf_wbid {

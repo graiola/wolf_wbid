@@ -1,76 +1,67 @@
 #include <wolf_wbid/wbid/tasks/wrench_task.h>
-#include <wolf_wbid/wbid/id_variables.h>
 
 #include <stdexcept>
 
 namespace wolf_wbid {
 
-WrenchTask::WrenchTask(std::string task_id,
-                       std::string contact_name,
-                       double weight)
-: task_id_(std::move(task_id))
-, contact_name_(std::move(contact_name))
-, weight_(weight)
+WrenchTask::WrenchTask(const std::string& task_id,
+                       const std::string& contact_name,
+                       const IDVariables& vars,
+                       double weight_scalar)
+: TaskBase(task_id)
+, contact_name_(contact_name)
+, vars_(vars)
 {
-  if(weight < 0.0) {
-    throw std::runtime_error("WrenchTask: negative weight");
-  }
-}
+  if(contact_name_.empty())
+    throw std::runtime_error("WrenchTask: empty contact_name");
 
-void WrenchTask::setWeight(double w)
-{
-  if(w < 0.0) {
-    throw std::runtime_error("WrenchTask: negative weight");
-  }
-  weight_.store(w);
+  if(!vars_.hasContact(contact_name_))
+    throw std::runtime_error("WrenchTask: unknown contact: " + contact_name_);
+
+  cb_ = vars_.contactBlock(contact_name_);
+
+  // Expect point contact for force tracking (3 dims).
+  if(cb_.dim < 3)
+    throw std::runtime_error("WrenchTask: contact block dim < 3 for " + contact_name_);
+
+  // LSQ is 3 rows (Fx,Fy,Fz), cols = nvars
+  resize(3, vars_.size());
+
+  // Selection matrix: pick [Fx,Fy,Fz] from the contact block
+  // A = [ 0 ... I3(at cb_.offset) ... 0 ]
+  A_.setZero();
+  A_.block(0, cb_.offset, 3, 3).setIdentity();
+
+  // Default weights: ones * weight_scalar
+  setWeightScalar(weight_scalar);
+
+  // Reference default
+  b_.setZero();
+  f_ref_.setZero();
 }
 
 void WrenchTask::setReference(const Eigen::Vector3d& f_ref)
 {
+  if(!std::isfinite(f_ref.x()) || !std::isfinite(f_ref.y()) || !std::isfinite(f_ref.z()))
+    throw std::runtime_error("WrenchTask::setReference(): non-finite reference");
+
   f_ref_ = f_ref;
+  b_ = f_ref_;
+}
+
+void WrenchTask::update(const Eigen::VectorXd& /*x*/)
+{
+  // A is constant, b is current reference.
+  // (No need to read x here; IDProblem uses A,b,wDiag to build H,g.)
+  // Keep b synced with reference:
+  b_ = f_ref_;
 }
 
 bool WrenchTask::reset()
 {
   f_ref_.setZero();
+  b_.setZero();
   return true;
-}
-
-void WrenchTask::compute(const IDVariables& vars, LsqTerm& out)
-{
-  // Only POINT_CONTACT supported (R^3)
-  if(vars.contactDim() != 3) {
-    throw std::runtime_error("WrenchTask: only POINT_CONTACT (3D force) supported");
-  }
-
-  if(!vars.hasContact(contact_name_)) {
-    throw std::runtime_error("WrenchTask: unknown contact '" + contact_name_ + "'");
-  }
-
-  constexpr int cd = 3;
-  const int n = vars.size();
-  const int off = vars.contactOffset(contact_name_);
-
-  if(off < 0 || off + cd > n) {
-    throw std::runtime_error("WrenchTask: contact block out of range for '" + contact_name_ + "'");
-  }
-
-  // A selects the contact force block from x
-  out.A.setZero(cd, n);
-  out.A.block(0, off, cd, cd).setIdentity();
-
-  // b is the desired force reference
-  out.b = f_ref_;
-
-  // diagonal weights (same scalar replicated on 3 axes)
-  out.w_diag.setConstant(cd, weight_.load());
-}
-
-void wolf_wbid::WrenchTask::update(const Eigen::VectorXd& /*x*/)
-{
-  // No-op:
-  // For WrenchTask the LSQ term (A,b,W) does not depend on x.
-  // Reference/weight are handled via setters (called by wrappers).
 }
 
 } // namespace wolf_wbid

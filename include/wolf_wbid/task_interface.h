@@ -23,8 +23,6 @@ class QuadrupedRobot;
 class IDVariables;
 }
 
-#define WORLD_FRAME_NAME "world" // FIXME REMOVE!
-
 // New OpenSoT-free tasks
 #include <wolf_wbid/wbid/tasks/cartesian_task.h>
 #include <wolf_wbid/wbid/tasks/com_task.h>
@@ -208,9 +206,10 @@ public:
   Wrench(const std::string& robot_name,
          const std::string& task_id,
          const std::string& contact_name,
-         const double& period = 0.001,
-         double weight = 1.0)
-  : WrenchTask(task_id, contact_name, weight)
+         const IDVariables& vars,
+         const double& period,
+         double weight)
+  : WrenchTask(task_id, contact_name, vars, weight)
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
@@ -228,12 +227,19 @@ public:
   using Ptr = std::shared_ptr<AngularMomentum>;
 
   AngularMomentum(const std::string& robot_name,
+                  const std::string& task_id,
                   QuadrupedRobot& robot,
                   const IDVariables& vars,
-                  const std::string& task_id = "angular_momentum",
                   const double& period = 0.001)
   : AngularMomentumTask(task_id, robot, vars)
   , TaskWrapperInterface(task_id, robot_name, period)
+  {}
+
+  AngularMomentum(const std::string& robot_name,
+                  QuadrupedRobot& robot,
+                  const IDVariables& vars,
+                  const double& period = 0.001)
+  : AngularMomentum(robot_name, "angular_momentum", robot, vars, period)
   {}
 
   void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
@@ -250,12 +256,19 @@ public:
   using Ptr = std::shared_ptr<Postural>;
 
   Postural(const std::string& robot_name,
+           const std::string& task_id,
            QuadrupedRobot& robot,
            const IDVariables& vars,
-           const std::string& task_id = "postural",
            const double& period = 0.001)
   : PosturalTask(task_id, robot, vars)
   , TaskWrapperInterface(task_id, robot_name, period)
+  {}
+
+  Postural(const std::string& robot_name,
+           QuadrupedRobot& robot,
+           const IDVariables& vars,
+           const double& period = 0.001)
+  : Postural(robot_name, "postural", robot, vars, period)
   {}
 
   void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }

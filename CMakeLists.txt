@@ -154,6 +154,7 @@ target_link_libraries(task_wrappers
 
 add_library(id_problem SHARED 
     src/id_problem.cpp
+    src/task_interface.cpp
     src/wbid/id_variables.cpp
     src/wbid/qp/eiquadprog_solver.cpp
     src/wbid/qp/qp_solver_factory.cpp
@@ -163,6 +164,7 @@ add_library(id_problem SHARED
     src/wbid/constraints/torque_limits_constraint.cpp
     src/wbid/constraints/dynamics_equality_constraint.cpp
     src/wbid/constraints/base_accel_z_constraint.cpp
+    src/wbid/tasks/task_base.cpp
     src/wbid/tasks/angular_momentum_task.cpp
     src/wbid/tasks/cartesian_task.cpp
     src/wbid/tasks/com_task.cpp

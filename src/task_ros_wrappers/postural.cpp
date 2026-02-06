@@ -9,7 +9,7 @@ PosturalImpl::PosturalImpl(const std::string& robot_name,
                            QuadrupedRobot& robot,
                            const IDVariables& idvars,
                            double period)
-: Postural(robot_name, robot, idvars, task_id, period)
+: Postural(robot_name, task_id, robot, idvars, period)
 , TaskRosHandler<wolf_msgs::PosturalTask>(task_id, robot_name, period)
 {
   // Pre-size msg arrays (publish() also resizes defensively)

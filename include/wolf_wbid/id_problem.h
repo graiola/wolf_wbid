@@ -29,8 +29,8 @@
 #include <wolf_wbid/wbid/id_variables.h>
 #include <wolf_wbid/wbid/qp/qp_problem.h>
 #include <wolf_wbid/wbid/qp/qp_solver.h>
-#include <wolf_wbid/wbid/task_base.h>
-#include <wolf_wbid/wbid/constraint_base.h>
+#include <wolf_wbid/wbid/tasks/task_base.h>
+#include <wolf_wbid/wbid/constraints/constraint_base.h>
 #include <wolf_wbid/wbid/constraints/friction_cone_constraint.h>
 #include <wolf_wbid/wbid/constraints/contact_force_bounds_constraint.h>
 #include <wolf_wbid/wbid/constraints/torque_limits_constraint.h>
@@ -151,12 +151,12 @@ private:
   void addLeastSquaresTerm(QPProblem& qp,
                            const Eigen::MatrixXd& A,
                            const Eigen::VectorXd& b,
-                           const Eigen::MatrixXd& W);
+                           const Eigen::VectorXd& w_diag);
 
   void addLeastSquaresRows(QPProblem& qp,
                            const Eigen::MatrixXd& A,
                            const Eigen::VectorXd& b,
-                           const Eigen::MatrixXd& W,
+                           const Eigen::VectorXd& w_diag,
                            const std::vector<int>& rows);
 
   // constraints helper (supports bounds via dynamic_cast to ConstraintBase)

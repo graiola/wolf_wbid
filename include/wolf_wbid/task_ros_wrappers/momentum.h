@@ -27,9 +27,9 @@ public:
   using Ptr = std::shared_ptr<AngularMomentumImpl>;
 
   AngularMomentumImpl(const std::string& robot_name,
+                      const std::string& task_id,
                       QuadrupedRobot& robot,
                       const IDVariables& vars,
-                      const std::string& task_id = "angular_momentum",
                       const double& period = 0.001);
 
   void registerReconfigurableVariables() override;
