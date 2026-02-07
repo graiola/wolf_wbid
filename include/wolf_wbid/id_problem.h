@@ -122,6 +122,9 @@ public:
 
   void setControlMode(mode_t mode); // kept for compatibility (WPG only used)
 
+  void setSolver(std::unique_ptr<IQPSolver> solver);
+  bool setSolverByName(const std::string& name);
+
 private:
 
   bool debug_enabled_{false};

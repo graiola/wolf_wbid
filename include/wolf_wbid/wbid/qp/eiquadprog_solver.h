@@ -15,7 +15,7 @@ public:
   QPSolution solve(const QPProblem& qp) override;
 
 private:
-  // Matches OpenSoT choice
+
   static constexpr double BASE_REGULARISATION = 2.22E-13;
 
   double eps_reg_{BASE_REGULARISATION}; // already scaled

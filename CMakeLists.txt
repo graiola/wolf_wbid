@@ -38,6 +38,7 @@ include_directories(
     third_party/XBotInterface/include
     third_party/XBotInterface/srdfdom_advr/include
     third_party/ModelInterfaceRBDL/include
+    external/qpOASES-ext/include
     ${EIGEN3_INCLUDE_DIRS}
     ${tf2_INCLUDE_DIRS}
     ${tf2_ros_INCLUDE_DIRS}
@@ -59,6 +60,7 @@ add_subdirectory(third_party/ModelInterfaceRBDL)
 
 # Solvers
 add_subdirectory(external/eiQuadProg-ext)
+add_subdirectory(external/qpOASES-ext)
 
 # ROS
 find_package(catkin QUIET)
@@ -75,6 +77,7 @@ if(${catkin_FOUND})
         third_party/XBotInterface/srdfdom_advr/include
         third_party/ModelInterfaceRBDL/include
         external/eiQuadProg-ext/include
+        external/qpOASES-ext/include
       LIBRARIES
         quadruped_robot
         cartesian_trajectory
@@ -86,6 +89,7 @@ if(${catkin_FOUND})
         XBotCoreModel
         ModelInterfaceRBDL
         eiQuadProg
+        qpOASES
       CATKIN_DEPENDS
         wolf_msgs
         wolf_controller_utils
@@ -97,7 +101,10 @@ if(${catkin_FOUND})
     message(STATUS "Add ROS definition")
 elseif(${ament_cmake_FOUND})
     set(TASK_WRAPPERS_FOLDER "task_ros2_wrappers")
-    ament_export_include_directories(include)
+    ament_export_include_directories(
+        include
+        external/eiQuadProg-ext/include
+        external/qpOASES-ext/include)
     ament_export_dependencies(wolf_msgs wolf_controller_utils interactive_markers realtime_tools kdl_parser)
     ament_export_libraries(
         quadruped_robot
@@ -109,7 +116,9 @@ elseif(${ament_cmake_FOUND})
         XBotInterface
         XBotCoreModel
         ModelInterfaceRBDL
-        matlogger2)
+        matlogger2
+        eiQuadProg
+        qpOASES)
     ament_package()
     add_definitions(-DROS2)
     message(STATUS "Add ROS2 definition")
@@ -157,6 +166,7 @@ add_library(id_problem SHARED
     src/task_interface.cpp
     src/wbid/id_variables.cpp
     src/wbid/qp/eiquadprog_solver.cpp
+    src/wbid/qp/qpoases_solver.cpp
     src/wbid/qp/qp_solver_factory.cpp
     src/wbid/constraints/friction_cone_constraint.cpp
     src/wbid/constraints/friction_cones_constraint.cpp
@@ -177,7 +187,8 @@ target_link_libraries(id_problem
     XBotInterface
     XBotCoreModel
     ModelInterfaceRBDL
-    eiQuadProg)
+    eiQuadProg
+    qpOASES)
 
 # Installation
 install(
@@ -197,6 +208,7 @@ install(TARGETS
         ModelInterfaceRBDL
         matlogger2
         eiQuadProg
+        qpOASES
         DESTINATION lib/${PROJECT_NAME}
         LIBRARY DESTINATION lib
 )

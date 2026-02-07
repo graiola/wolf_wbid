@@ -272,6 +272,24 @@ void IDProblem::setControlMode(mode_t mode)
   }
 }
 
+void IDProblem::setSolver(std::unique_ptr<IQPSolver> solver)
+{
+  if(!solver) {
+    throw std::runtime_error("IDProblem::setSolver(): null solver");
+  }
+  solver_ = std::move(solver);
+}
+
+bool IDProblem::setSolverByName(const std::string& name)
+{
+  auto solver = CreateSolverByName(name);
+  if(!solver) {
+    return false;
+  }
+  setSolver(std::move(solver));
+  return true;
+}
+
 void IDProblem::setFrictionConesMu(const double& mu)
 {
   if(mu < 0.0 || mu > 1.0) throw std::runtime_error("mu out of [0,1]");

@@ -5,5 +5,5 @@
 
 namespace wolf_wbid {
 std::unique_ptr<IQPSolver> CreateDefaultSolver();
+std::unique_ptr<IQPSolver> CreateSolverByName(const std::string& name);
 }
-
