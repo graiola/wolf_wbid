@@ -7,9 +7,12 @@
 #include <wolf_controller_utils/geometry.h>
 #include <wolf_controller_utils/common.h>
 #include <stdexcept>
+#include <iostream>
+#include <string>
 #include <algorithm>
 #include <unordered_set>
 #include <limits>
+#include <cstdlib>
 
 namespace wolf_wbid {
 
@@ -38,22 +41,26 @@ QuadrupedRobotRBDL::QuadrupedRobotRBDL(const std::string& robot_name,
                                        const std::string& urdf,
                                        const std::string& srdf)
 {
+  std::cerr << "[QuadrupedRobotRBDL] ctor begin\n" << std::flush;
+  std::cerr << "[QuadrupedRobotRBDL] parsing URDF string\n" << std::flush;
   if(!urdf_model_.initString(urdf)) {
+    std::cerr << "[QuadrupedRobotRBDL] URDF parse failed\n" << std::flush;
     throw std::runtime_error("QuadrupedRobotRBDL: unable to parse URDF string");
   }
+  std::cerr << "[QuadrupedRobotRBDL] URDF parsed\n" << std::flush;
   urdf_string_ = urdf;
   srdf_string_ = srdf;
 
+  std::cerr << "[QuadrupedRobotRBDL] parsing SRDF string\n" << std::flush;
   if(!srdf_model_.initString(urdf_model_, srdf)) {
+    std::cerr << "[QuadrupedRobotRBDL] SRDF parse failed\n" << std::flush;
     throw std::runtime_error("QuadrupedRobotRBDL: unable to parse SRDF string");
   }
+  std::cerr << "[QuadrupedRobotRBDL] SRDF parsed\n" << std::flush;
 
-  rbdl_model_ = RigidBodyDynamics::Model();
-  if(!RigidBodyDynamics::Addons::URDFReadFromString(urdf.c_str(), &rbdl_model_, true, false)) {
-    throw std::runtime_error("QuadrupedRobotRBDL: cannot initialize RBDL model");
-  }
-
+  std::cerr << "[QuadrupedRobotRBDL] parsing SRDF into names\n" << std::flush;
   parser_.parseSRDF(urdf, srdf);
+  std::cerr << "[QuadrupedRobotRBDL] SRDF parsed into names\n" << std::flush;
   robot_model_name_ = parser_.getRobotModelName();
   leg_names_        = parser_.getLegNames();
   foot_names_       = parser_.getFootNames();
@@ -66,13 +73,22 @@ QuadrupedRobotRBDL::QuadrupedRobotRBDL(const std::string& robot_name,
   imu_name_         = parser_.getImuLinkName();
   robot_name_       = robot_name;
 
-  if(rbdl_model_.q_size >= FLOATING_BASE_DOFS && rbdl_model_.mBodies.size() > 2) {
-    floating_base_link_id_ = 2;
-    floating_base_link_name_ = rbdl_model_.GetBodyName(floating_base_link_id_);
-  } else {
-    floating_base_link_id_ = linkId(base_name_);
-    floating_base_link_name_ = base_name_;
-    if(floating_base_link_id_ < 0) {
+  rbdl_model_ = RigidBodyDynamics::Model();
+  std::cerr << "[QuadrupedRobotRBDL] building RBDL model\n" << std::flush;
+  if(!RigidBodyDynamics::Addons::URDFReadFromString(urdf.c_str(), &rbdl_model_, true, false)) {
+    std::cerr << "[QuadrupedRobotRBDL] RBDL model build failed\n" << std::flush;
+    throw std::runtime_error("QuadrupedRobotRBDL: cannot initialize RBDL model");
+  }
+  std::cerr << "[QuadrupedRobotRBDL] RBDL model built\n" << std::flush;
+  // Always prefer the actual base link id from the model
+  floating_base_link_id_ = linkId(base_name_);
+  floating_base_link_name_ = base_name_;
+  if(floating_base_link_id_ <= 0) {
+    // Fallback for older models where base is not found
+    if(rbdl_model_.q_size >= FLOATING_BASE_DOFS && rbdl_model_.mBodies.size() > 2) {
+      floating_base_link_id_ = 2;
+      floating_base_link_name_ = rbdl_model_.GetBodyName(floating_base_link_id_);
+    } else {
       floating_base_link_id_ = 0;
     }
   }
@@ -185,14 +201,35 @@ QuadrupedRobotRBDL::QuadrupedRobotRBDL(const std::string& robot_name,
   limb_names_.insert(limb_names_.end(), leg_names_.begin(), leg_names_.end());
   limb_names_.insert(limb_names_.end(), arm_names_.begin(), arm_names_.end());
 
-  contact_names_ = foot_names_;
-  contact_names_.insert(contact_names_.end(), ee_names_.begin(), ee_names_.end());
+  contact_names_ = parser_.getContactNames();
+  if(contact_names_.empty()) {
+    contact_names_ = foot_names_;
+  } else {
+    // Ensure arm end-effectors are never treated as contacts.
+    contact_names_.erase(
+      std::remove_if(contact_names_.begin(), contact_names_.end(),
+                     [&](const std::string& name) {
+                       return std::find(ee_names_.begin(), ee_names_.end(), name) != ee_names_.end();
+                     }),
+      contact_names_.end()
+    );
+    if(contact_names_.empty()) {
+      contact_names_ = foot_names_;
+    }
+  }
 
   // Allocate state
   q_.setZero(rbdl_model_.q_size);
   qdot_.setZero(rbdl_model_.qdot_size);
   qddot_.setZero(rbdl_model_.qdot_size);
   tau_.setZero(rbdl_model_.qdot_size);
+
+  // Initialize floating base orientation to identity (RBDL expects quaternion in q_)
+  if(floating_base_link_id_ > 0 &&
+     rbdl_model_.mJoints[floating_base_link_id_].mJointType == RigidBodyDynamics::JointTypeSpherical) {
+    RigidBodyDynamics::Math::Quaternion q_id(0.0, 0.0, 0.0, 1.0);
+    rbdl_model_.SetQuaternion(floating_base_link_id_, q_id, q_);
+  }
 
   // Initialize transforms
   world_T_base_.setIdentity();
@@ -309,6 +346,11 @@ bool QuadrupedRobotRBDL::loadSrdfState(const std::string& state_name, Eigen::Vec
   if(it == states.end()) return false;
 
   q.setZero(rbdl_model_.q_size);
+  if(floating_base_link_id_ > 0 &&
+     rbdl_model_.mJoints[floating_base_link_id_].mJointType == RigidBodyDynamics::JointTypeSpherical) {
+    RigidBodyDynamics::Math::Quaternion q_id(0.0, 0.0, 0.0, 1.0);
+    rbdl_model_.SetQuaternion(floating_base_link_id_, q_id, q);
+  }
   for(const auto& jp : it->joint_values_) {
     auto map_it = joint_idx_.find(jp.first);
     if(map_it != joint_idx_.end()) {
@@ -887,7 +929,7 @@ bool QuadrupedRobotRBDL::getJacobian(const std::string& link_name, const std::st
 
 double QuadrupedRobotRBDL::getCurrentHeight() { return current_height_; }
 
-int QuadrupedRobotRBDL::getJointNum() const { return static_cast<int>(q_.size()); }
+int QuadrupedRobotRBDL::getJointNum() const { return static_cast<int>(rbdl_model_.qdot_size); }
 double QuadrupedRobotRBDL::getMass() const
 {
   double mass = 0.0;
@@ -924,18 +966,32 @@ bool QuadrupedRobotRBDL::getFloatingBasePose(Eigen::Affine3d& pose) const
 
 bool QuadrupedRobotRBDL::setFloatingBasePose(const Eigen::Affine3d& pose)
 {
-  Eigen::Vector3d rpy = pose.linear().eulerAngles(0,1,2);
   if(q_.size() < FLOATING_BASE_DOFS) return false;
   q_.segment<3>(0) = pose.translation() - fb_origin_offset_;
-  q_.segment<3>(3) = rpy;
+  if(floating_base_link_id_ > 0 &&
+     rbdl_model_.mJoints[floating_base_link_id_].mJointType == RigidBodyDynamics::JointTypeSpherical) {
+    RigidBodyDynamics::Math::Quaternion quat =
+        RigidBodyDynamics::Math::Quaternion::fromMatrix(pose.linear());
+    rbdl_model_.SetQuaternion(floating_base_link_id_, quat, q_);
+  } else {
+    Eigen::Vector3d rpy = pose.linear().eulerAngles(0,1,2);
+    q_.segment<3>(3) = rpy;
+  }
   return true;
 }
 
 bool QuadrupedRobotRBDL::setFloatingBaseOrientation(const Eigen::Matrix3d& world_R_base)
 {
-  Eigen::Vector3d rpy = world_R_base.eulerAngles(0,1,2);
   if(q_.size() < FLOATING_BASE_DOFS) return false;
-  q_.segment<3>(3) = rpy;
+  if(floating_base_link_id_ > 0 &&
+     rbdl_model_.mJoints[floating_base_link_id_].mJointType == RigidBodyDynamics::JointTypeSpherical) {
+    RigidBodyDynamics::Math::Quaternion quat =
+        RigidBodyDynamics::Math::Quaternion::fromMatrix(world_R_base);
+    rbdl_model_.SetQuaternion(floating_base_link_id_, quat, q_);
+  } else {
+    Eigen::Vector3d rpy = world_R_base.eulerAngles(0,1,2);
+    q_.segment<3>(3) = rpy;
+  }
   return true;
 }
 

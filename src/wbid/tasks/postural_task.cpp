@@ -51,9 +51,16 @@ void PosturalTask::setWeightDiag(double w)
 
 void PosturalTask::setReference(const Eigen::VectorXd& q_ref)
 {
-  if(q_ref.size() != n_)
-    throw std::runtime_error("PosturalTask::setReference(q): size mismatch");
-  q_ref_ = q_ref;
+  if(q_ref.size() == n_) {
+    q_ref_ = q_ref;
+    return;
+  }
+  if(q_ref.size() == n_ + 1) {
+    // RBDL appends quaternion scalar at the end of q; drop it.
+    q_ref_ = q_ref.head(n_);
+    return;
+  }
+  throw std::runtime_error("PosturalTask::setReference(q): size mismatch");
 }
 
 void PosturalTask::setReference(const Eigen::VectorXd& q_ref, const Eigen::VectorXd& qd_ref)
@@ -75,8 +82,17 @@ void PosturalTask::setGains(const Eigen::MatrixXd& Kp, const Eigen::MatrixXd& Kd
 // ---- QuadrupedRobot adapters (adjust if needed) ----
 void PosturalTask::getJointPosition(Eigen::VectorXd& q) const
 {
-  q.resize(robot_.getJointNum());
-  robot_.getJointPosition(q);
+  Eigen::VectorXd q_raw;
+  robot_.getJointPosition(q_raw);
+  if(q_raw.size() == n_) {
+    q = q_raw;
+    return;
+  }
+  if(q_raw.size() == n_ + 1) {
+    q = q_raw.head(n_);
+    return;
+  }
+  q = q_raw;
 }
 void PosturalTask::getJointVelocity(Eigen::VectorXd& qd) const
 {

@@ -43,7 +43,30 @@ typedef map<string, LinkPtr > URDFLinkMap;
 typedef map<string, JointPtr > URDFJointMap;
 
 bool construct_model (Model* rbdl_model, ModelPtr urdf_model, bool floating_base, bool verbose) {
+	if (!urdf_model) {
+		cerr << "[RBDL urdfreader] construct_model: null urdf_model" << endl;
+		return false;
+	}
+	if (!urdf_model->getRoot()) {
+		cerr << "[RBDL urdfreader] construct_model: null root" << endl;
+		return false;
+	}
 	LinkPtr urdf_root_link;
+
+	// If the URDF has a 'world' root with a floating_base_joint to base_link,
+	// treat base_link as the root to mimic old XBot behavior.
+	ConstLinkPtr root_const = urdf_model->getRoot();
+	std::string root_name = root_const ? root_const->name : std::string();
+	if (root_const && root_name == "world") {
+		for (const auto& cj : root_const->child_joints) {
+			if (!cj) continue;
+			if (cj->name == "floating_base_joint" || cj->type == urdf::Joint::FLOATING) {
+				root_name = cj->child_link_name;
+				cerr << "[RBDL urdfreader] using '" << root_name << "' as root (skipping world/floating_base_joint)" << endl;
+				break;
+			}
+		}
+	}
 
 	URDFLinkMap link_map;
 	link_map = urdf_model->links_;
@@ -57,10 +80,14 @@ bool construct_model (Model* rbdl_model, ModelPtr urdf_model, bool floating_base
 	stack<int> joint_index_stack;
 
 	// add the bodies in a depth-first order of the model tree
-	link_stack.push (link_map[(urdf_model->getRoot()->name)]);
+	if (root_name.empty() || link_map.find(root_name) == link_map.end()) {
+		cerr << "[RBDL urdfreader] root link '" << root_name << "' not found in link_map" << endl;
+		return false;
+	}
+	link_stack.push (link_map[root_name]);
 
 	// add the root body
-	ConstLinkPtr& root = urdf_model->getRoot ();
+	ConstLinkPtr root = link_map[root_name];
 	Vector3d root_inertial_rpy;
 	Vector3d root_inertial_position;
 	Matrix3d root_inertial_inertia;
@@ -152,9 +179,43 @@ bool construct_model (Model* rbdl_model, ModelPtr urdf_model, bool floating_base
 
 	unsigned int j;
 	for (j = 0; j < joint_names.size(); j++) {
-		JointPtr urdf_joint = joint_map[joint_names[j]];
-		LinkPtr urdf_parent = link_map[urdf_joint->parent_link_name];
-		LinkPtr urdf_child = link_map[urdf_joint->child_link_name];
+		const std::string& joint_name = joint_names[j];
+		cerr << "[RBDL urdfreader] processing joint_name '" << joint_name << "'" << endl;
+
+		auto joint_it = joint_map.find(joint_name);
+		if (joint_it == joint_map.end() || !joint_it->second) {
+			cerr << "[RBDL urdfreader] joint '" << joint_name << "' not found in joint_map" << endl;
+			return false;
+		}
+		JointPtr urdf_joint = joint_it->second;
+
+		auto parent_it = link_map.find(urdf_joint->parent_link_name);
+		if (parent_it == link_map.end() || !parent_it->second) {
+			cerr << "[RBDL urdfreader] parent link '" << urdf_joint->parent_link_name
+			     << "' not found for joint '" << urdf_joint->name << "'" << endl;
+			return false;
+		}
+		LinkPtr urdf_parent = parent_it->second;
+
+		auto child_it = link_map.find(urdf_joint->child_link_name);
+		if (child_it == link_map.end() || !child_it->second) {
+			cerr << "[RBDL urdfreader] child link '" << urdf_joint->child_link_name
+			     << "' not found for joint '" << urdf_joint->name << "'" << endl;
+			return false;
+		}
+		LinkPtr urdf_child = child_it->second;
+
+		cerr << "[RBDL urdfreader] processing joint '" << urdf_joint->name
+		     << "' parent='" << urdf_parent->name
+		     << "' child='" << urdf_child->name << "'" << endl;
+
+		// Skip IMU joints/links (not needed for dynamics and can crash parsing).
+		if (urdf_joint->name.find("imu") != std::string::npos ||
+		    urdf_parent->name.find("imu") != std::string::npos ||
+		    urdf_child->name.find("imu") != std::string::npos) {
+			cerr << "[RBDL urdfreader] skipping IMU joint '" << urdf_joint->name << "'" << endl;
+			continue;
+		}
 
 		// determine where to add the current joint and child body
 		unsigned int rbdl_parent_id = 0;
@@ -272,6 +333,7 @@ bool construct_model (Model* rbdl_model, ModelPtr urdf_model, bool floating_base
 		} else {
 			rbdl_model->AddBody (rbdl_parent_id, rbdl_joint_frame, rbdl_joint, rbdl_body, urdf_child->name);
 		}
+		cerr << "[RBDL urdfreader] added joint '" << urdf_joint->name << "'" << endl;
 	}
 
 	return true;
@@ -299,7 +361,19 @@ RBDL_DLLAPI bool URDFReadFromFile (const char* filename, Model* model, bool floa
 RBDL_DLLAPI bool URDFReadFromString (const char* model_xml_string, Model* model, bool floating_base, bool verbose) {
 	assert (model);
 
+	cerr << "[RBDL urdfreader] URDFReadFromString begin" << endl;
 	ModelPtr urdf_model = urdf::parseURDF (model_xml_string);
+	if (!urdf_model) {
+		cerr << "[RBDL urdfreader] parseURDF failed (null model)" << endl;
+		return false;
+	}
+	if (!urdf_model->getRoot()) {
+		cerr << "[RBDL urdfreader] parseURDF failed (null root)" << endl;
+		return false;
+	}
+	cerr << "[RBDL urdfreader] parseURDF ok root='" << urdf_model->getRoot()->name
+	     << "' links=" << urdf_model->links_.size()
+	     << " joints=" << urdf_model->joints_.size() << endl;
  
 	if (!construct_model (model, urdf_model, floating_base, verbose)) {
 		cerr << "Error constructing model from urdf file." << endl;
