@@ -35,9 +35,6 @@ include_directories(
     third_party/rbdl/include
     third_party/
     third_party/MatLogger2/include
-    third_party/XBotInterface/include
-    third_party/XBotInterface/srdfdom_advr/include
-    third_party/ModelInterfaceRBDL/include
     external/qpOASES-ext/include
     ${EIGEN3_INCLUDE_DIRS}
     ${tf2_INCLUDE_DIRS}
@@ -55,8 +52,6 @@ link_directories(/opt/ros/$ENV{ROS_DISTRO}/lib/) # FIX FOR ROS HUMBLE
 # Include ADVR packages as subdirectories
 add_subdirectory(third_party/rbdl)
 add_subdirectory(third_party/MatLogger2)
-add_subdirectory(third_party/XBotInterface)
-add_subdirectory(third_party/ModelInterfaceRBDL)
 
 # Solvers
 add_subdirectory(external/eiQuadProg-ext)
@@ -73,9 +68,6 @@ if(${catkin_FOUND})
         third_party/rbdl/include
         third_party/
         third_party/MatLogger2/include
-        third_party/XBotInterface/include
-        third_party/XBotInterface/srdfdom_advr/include
-        third_party/ModelInterfaceRBDL/include
         external/eiQuadProg-ext/include
         external/qpOASES-ext/include
       LIBRARIES
@@ -85,9 +77,6 @@ if(${catkin_FOUND})
         task_wrappers
         rbdl
         rbdl_urdfreader
-        XBotInterface
-        XBotCoreModel
-        ModelInterfaceRBDL
         eiQuadProg
         qpOASES
       CATKIN_DEPENDS
@@ -113,9 +102,6 @@ elseif(${ament_cmake_FOUND})
         task_wrappers
         rbdl
         rbdl_urdfreader
-        XBotInterface
-        XBotCoreModel
-        ModelInterfaceRBDL
         matlogger2
         eiQuadProg
         qpOASES)
@@ -125,12 +111,9 @@ elseif(${ament_cmake_FOUND})
 endif()
 
 add_library(quadruped_robot SHARED
-    src/quadruped_robot.cpp)
+    src/quadruped_robot_rbdl.cpp)
 target_link_libraries(quadruped_robot
-    ${wolf_controller_utils_LIBRARIES}
-    XBotInterface
-    XBotCoreModel
-    ModelInterfaceRBDL)
+    ${wolf_controller_utils_LIBRARIES})
 
 add_library(cartesian_trajectory SHARED
     src/cartesian_trajectory.cpp)
@@ -154,9 +137,6 @@ target_link_libraries(task_wrappers
     ${wolf_controller_utils_LIBRARIES}
     ${wolf_msgs_LIBRARIES}
     ${interactive_markers_LIBRARIES}
-    XBotInterface
-    XBotCoreModel
-    ModelInterfaceRBDL
     interactive_markers # FIX FOR ROS HUMBLE
     realtime_tools # FIX FOR ROS HUMBLE
     )
@@ -184,9 +164,6 @@ add_library(id_problem SHARED
 target_link_libraries(id_problem
     quadruped_robot 
     task_wrappers 
-    XBotInterface
-    XBotCoreModel
-    ModelInterfaceRBDL
     eiQuadProg
     qpOASES)
 
@@ -203,9 +180,6 @@ install(TARGETS
         cartesian_trajectory
         id_problem
         task_wrappers
-        XBotInterface
-        XBotCoreModel
-        ModelInterfaceRBDL
         matlogger2
         eiQuadProg
         qpOASES

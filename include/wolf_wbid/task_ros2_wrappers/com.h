@@ -31,7 +31,7 @@ public:
   typedef std::shared_ptr<ComImpl> Ptr;
 
   ComImpl(const std::string& robot_name,
-          const XBot::ModelInterface& robot,
+          QuadrupedRobot& robot,
           const OpenSoT::AffineHelper& qddot,
           const double& period = 0.001);
 
@@ -61,4 +61,3 @@ private:
 } // namespace
 
 #endif // TASK_ROS2_WRAPPERS_COM_H
-

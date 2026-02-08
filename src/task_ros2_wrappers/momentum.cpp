@@ -13,7 +13,7 @@
 using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
-AngularMomentumImpl::AngularMomentumImpl(const std::string& robot_name, XBot::ModelInterface& robot, const OpenSoT::AffineHelper& qddot, const double& period)
+AngularMomentumImpl::AngularMomentumImpl(const std::string& robot_name, QuadrupedRobot& robot, const OpenSoT::AffineHelper& qddot, const double& period)
   :AngularMomentum(robot_name,robot,qddot,period)
   ,TaskRosHandler<wolf_msgs::msg::CartesianTask>(_task_id,robot_name,period)
 {

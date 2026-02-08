@@ -123,7 +123,12 @@ void CartesianTask::update(const Eigen::VectorXd& /*x*/)
   if(base_link_ == kWorldName)
   {
     if(!robot_.getPose(distal_link_, pose_current))
+    {
+      PRINT_ERROR_NAMED("CartesianTask",
+                        "getPose(distal, world) failed. distal='" << distal_link_
+                        << "' base='" << base_link_ << "'");
       throw std::runtime_error("CartesianTask::update(): getPose(distal, world) failed");
+    }
 
     if(!robot_.getJacobian(distal_link_, J6))
       throw std::runtime_error("CartesianTask::update(): getJacobian(distal, world) failed");
@@ -137,7 +142,12 @@ void CartesianTask::update(const Eigen::VectorXd& /*x*/)
   else
   {
     if(!robot_.getPose(distal_link_, base_link_, pose_current))
+    {
+      PRINT_ERROR_NAMED("CartesianTask",
+                        "getPose(distal, base) failed. distal='" << distal_link_
+                        << "' base='" << base_link_ << "'");
       throw std::runtime_error("CartesianTask::update(): getPose(distal, base) failed");
+    }
 
     if(!robot_.getJacobian(distal_link_, base_link_, J6))
       throw std::runtime_error("CartesianTask::update(): getJacobian(distal in base) failed");

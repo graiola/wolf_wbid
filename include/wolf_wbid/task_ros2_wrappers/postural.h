@@ -27,7 +27,7 @@ public:
   typedef std::shared_ptr<PosturalImpl> Ptr;
 
   PosturalImpl(const std::string& robot_name,
-               const XBot::ModelInterface& robot,
+               QuadrupedRobot& robot,
                OpenSoT::AffineHelper qddot = OpenSoT::AffineHelper(),
                const std::string& task_id = "postural",
                const double& period = 0.001);
@@ -51,4 +51,3 @@ private:
 } // namespace
 
 #endif // TASK_ROS2_WRAPPERS_POSTURAL_H
-

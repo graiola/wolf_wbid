@@ -27,7 +27,7 @@ public:
   typedef std::shared_ptr<AngularMomentumImpl> Ptr;
 
   AngularMomentumImpl(const std::string& robot_name,
-                      XBot::ModelInterface& robot,
+                      QuadrupedRobot& robot,
                       const OpenSoT::AffineHelper& qddot,
                       const double& period = 0.001);
 
@@ -48,4 +48,3 @@ public:
 } // namespace
 
 #endif // TASK_ROS2_WRAPPERS_MOMENTUM_H
-

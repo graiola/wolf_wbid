@@ -19,7 +19,7 @@ using namespace wolf_wbid;
 
 CartesianImpl::CartesianImpl(const std::string& robot_name,
                      const std::string& task_id,
-                     const XBot::ModelInterface& robot,
+                     QuadrupedRobot& robot,
                      const std::string& distal_link,
                      const std::string& base_link,
                      const OpenSoT::AffineHelper& qddot,
@@ -706,4 +706,3 @@ void CartesianImpl::changeBaseLink(const visualization_msgs::msg::InteractiveMar
     interactive_marker_server_.applyChanges();
   }
 }
-

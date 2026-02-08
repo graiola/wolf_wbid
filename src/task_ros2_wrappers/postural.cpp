@@ -12,8 +12,8 @@
 using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
-PosturalImpl::PosturalImpl(const std::string& robot_name, const XBot::ModelInterface& robot,
-                   OpenSoT::AffineHelper qddot, const std::string& task_id, const double& period)
+PosturalImpl::PosturalImpl(const std::string& robot_name, QuadrupedRobot& robot,
+                           OpenSoT::AffineHelper qddot, const std::string& task_id, const double& period)
   :Postural(robot_name,robot,qddot,task_id,period)
   ,TaskRosHandler<wolf_msgs::msg::PosturalTask>(task_id,robot_name,period)
 {

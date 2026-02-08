@@ -13,7 +13,7 @@ using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
 ComImpl::ComImpl(const std::string& robot_name,
-                 const XBot::ModelInterface& robot,
+                 QuadrupedRobot& robot,
                  const OpenSoT::AffineHelper& qddot,
                  const double& period)
 : Com(robot_name, robot, qddot, period),
