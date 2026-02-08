@@ -1,5 +1,5 @@
 #include <wolf_wbid/wbid/tasks/com_task.h>
-#include <wolf_wbid/quadruped_robot.h>
+#include <wolf_wbid/core/quadruped_robot.h>
 
 #include <stdexcept>
 

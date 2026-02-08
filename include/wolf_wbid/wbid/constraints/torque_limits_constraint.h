@@ -7,7 +7,7 @@
 
 #include <wolf_wbid/wbid/constraints/constraint_base.h>
 #include <wolf_wbid/wbid/id_variables.h>
-#include <wolf_wbid/quadruped_robot.h>
+#include <wolf_wbid/core/quadruped_robot.h>
 
 namespace wolf_wbid {
 

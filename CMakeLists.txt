@@ -32,10 +32,8 @@ include_directories(
     /opt/ros/$ENV{ROS_DISTRO}/include/kdl_parser/  # FIX FOR ROS HUMBLE
     /opt/ros/$ENV{ROS_DISTRO}/include/realtime_tools/ # FIX FOR ROS HUMBLE
     /opt/ros/$ENV{ROS_DISTRO}/include/interactive_markers/ # FIX FOR ROS HUMBLE
-    third_party/rbdl/include
-    third_party/
-    third_party/MatLogger2/include
-    external/qpOASES-ext/include
+    external/rbdl/include
+    external/qpOASES/include
     ${EIGEN3_INCLUDE_DIRS}
     ${tf2_INCLUDE_DIRS}
     ${tf2_ros_INCLUDE_DIRS}
@@ -49,27 +47,24 @@ include_directories(
 link_directories(/opt/ros/$ENV{ROS_DISTRO}/lib/) # FIX FOR ROS HUMBLE
 
 # ADVR Packages
-# Include ADVR packages as subdirectories
-add_subdirectory(third_party/rbdl)
-add_subdirectory(third_party/MatLogger2)
+# (third_party removed)
 
 # Solvers
-add_subdirectory(external/eiQuadProg-ext)
-add_subdirectory(external/qpOASES-ext)
+add_subdirectory(external/rbdl)
+add_subdirectory(external/eiQuadProg)
+add_subdirectory(external/qpOASES)
 
 # ROS
 find_package(catkin QUIET)
 find_package(ament_cmake QUIET)
 if(${catkin_FOUND})
-    set(TASK_WRAPPERS_FOLDER "task_ros_wrappers")
+    set(TASK_WRAPPERS_FOLDER "ros")
     catkin_package(
       INCLUDE_DIRS
         include
-        third_party/rbdl/include
-        third_party/
-        third_party/MatLogger2/include
-        external/eiQuadProg-ext/include
-        external/qpOASES-ext/include
+        external/rbdl/include
+        external/eiQuadProg/include
+        external/qpOASES/include
       LIBRARIES
         quadruped_robot
         cartesian_trajectory
@@ -89,11 +84,12 @@ if(${catkin_FOUND})
     add_definitions(-DROS)
     message(STATUS "Add ROS definition")
 elseif(${ament_cmake_FOUND})
-    set(TASK_WRAPPERS_FOLDER "task_ros2_wrappers")
+    set(TASK_WRAPPERS_FOLDER "ros2")
     ament_export_include_directories(
         include
-        external/eiQuadProg-ext/include
-        external/qpOASES-ext/include)
+        external/rbdl/include
+        external/eiQuadProg/include
+        external/qpOASES/include)
     ament_export_dependencies(wolf_msgs wolf_controller_utils interactive_markers realtime_tools kdl_parser)
     ament_export_libraries(
         quadruped_robot
@@ -102,7 +98,6 @@ elseif(${ament_cmake_FOUND})
         task_wrappers
         rbdl
         rbdl_urdfreader
-        matlogger2
         eiQuadProg
         qpOASES)
     ament_package()
@@ -111,12 +106,14 @@ elseif(${ament_cmake_FOUND})
 endif()
 
 add_library(quadruped_robot SHARED
-    src/quadruped_robot_rbdl.cpp)
+    src/core/quadruped_robot_rbdl.cpp)
 target_link_libraries(quadruped_robot
+    rbdl
+    rbdl_urdfreader
     ${wolf_controller_utils_LIBRARIES})
 
 add_library(cartesian_trajectory SHARED
-    src/cartesian_trajectory.cpp)
+    src/core/cartesian_trajectory.cpp)
 target_link_libraries(cartesian_trajectory)
 
 add_library(task_wrappers SHARED
@@ -142,8 +139,8 @@ target_link_libraries(task_wrappers
     )
 
 add_library(id_problem SHARED 
-    src/id_problem.cpp
-    src/task_interface.cpp
+    src/core/id_problem.cpp
+    src/core/task_interface.cpp
     src/wbid/id_variables.cpp
     src/wbid/qp/eiquadprog_solver.cpp
     src/wbid/qp/qpoases_solver.cpp
@@ -180,7 +177,6 @@ install(TARGETS
         cartesian_trajectory
         id_problem
         task_wrappers
-        matlogger2
         eiQuadProg
         qpOASES
         DESTINATION lib/${PROJECT_NAME}
