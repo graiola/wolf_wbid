@@ -31,6 +31,14 @@ static inline std::vector<int> rowsXYZ() { return {0,1,2}; }
 static inline std::vector<int> rowsXY()  { return {0,1}; }
 static inline std::vector<int> rowsZ()   { return {2}; }
 static inline std::vector<int> rowsRPY() { return {3,4,5}; }
+static inline std::vector<int> rowsLimbs(int n_rows)
+{
+  std::vector<int> rows;
+  if(n_rows <= FLOATING_BASE_DOFS) return rows;
+  rows.reserve(n_rows - FLOATING_BASE_DOFS);
+  for(int i = FLOATING_BASE_DOFS; i < n_rows; ++i) rows.push_back(i);
+  return rows;
+}
 
 /**
  * Block regularization:
@@ -688,7 +696,7 @@ bool IDProblem::buildQP(QPProblem& qp)
   // Postural
   if(activate_postural_) {
     const auto& t = *postural_;
-    addLeastSquaresTerm(qp, t.A(), t.b(), t.wDiag());
+    addLeastSquaresRows(qp, t.A(), t.b(), t.wDiag(), rowsLimbs(t.rows()));
   }
 
   // -------- Constraints update + merge --------
