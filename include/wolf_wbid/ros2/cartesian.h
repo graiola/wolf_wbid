@@ -64,6 +64,7 @@ public:
 
   virtual bool reset() override;
 
+
 protected:
 
   void makeMarker(const std::string &distal_link, const std::string &base_link, unsigned int interaction_mode, bool show);
@@ -189,6 +190,7 @@ private:
    */
   realtime_tools::RealtimeBuffer<Eigen::Affine3d> buffer_reference_pose_;
   realtime_tools::RealtimeBuffer<Eigen::Vector6d> buffer_reference_twist_;
+
 
   typename rclcpp::Subscription<wolf_msgs::msg::Cartesian>::SharedPtr reference_sub_;
 

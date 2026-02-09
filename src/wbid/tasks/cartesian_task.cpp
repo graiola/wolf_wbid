@@ -39,6 +39,24 @@ CartesianTask::CartesianTask(const std::string& task_id,
 bool CartesianTask::setBaseLink(const std::string& new_base_link)
 {
   if(new_base_link.empty()) return false;
+  if(new_base_link == base_link_) return true;
+
+  try {
+    Eigen::Affine3d T_W_old = Eigen::Affine3d::Identity();
+    Eigen::Affine3d T_W_new = Eigen::Affine3d::Identity();
+
+    getLinkPoseInWorld(base_link_, T_W_old);
+    getLinkPoseInWorld(new_base_link, T_W_new);
+
+    // Preserve pose reference across base change
+    const Eigen::Affine3d T_W_ref = T_W_old * pose_ref_;
+    pose_ref_ = T_W_new.inverse() * T_W_ref;
+  } catch (...) {
+    return false;
+  }
+
+  // Reset twist reference when switching base
+  twist_ref_.setZero();
   base_link_ = new_base_link;
   return true;
 }

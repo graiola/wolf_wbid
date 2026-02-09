@@ -234,6 +234,13 @@ bool CartesianImpl::reset()
   tmp_vector6d_.setZero();
   buffer_reference_twist_.initRT(tmp_vector6d_);
 
+  // Keep marker aligned with current reference
+  getReference(tmp_affine3d_);
+  geometry_msgs::msg::Pose pose_msg;
+  wolf_controller_utils::affine3dToPose(tmp_affine3d_, pose_msg);
+  interactive_marker_server_.setPose(interactive_marker_.name, pose_msg);
+  interactive_marker_server_.applyChanges();
+
   return res;
 }
 
@@ -688,9 +695,24 @@ void CartesianImpl::changeBaseLink(const visualization_msgs::msg::InteractiveMar
   // If successfully set the new base link
   if (setBaseLink(new_base_link))
   {
-    // Update the internal state and reset necessary parameters
-    update(Eigen::VectorXd(1)); // Dummy update call, can be changed based on specific requirements
-    reset();
+    Eigen::Affine3d pose_ref;
+    getReference(pose_ref);
+    buffer_reference_pose_.writeFromNonRT(pose_ref);
+
+    Eigen::Vector6d twist = Eigen::Vector6d::Zero();
+    buffer_reference_twist_.writeFromNonRT(twist);
+
+    // Refresh marker UI without altering reference
+    clearMarker();
+    makeMarker(getDistalLink(), getBaseLink(),
+               static_cast<unsigned int>(control_type_), true);
+
+    // Keep marker aligned with current reference (avoid jump to origin)
+    Eigen::Affine3d pose_ref;
+    getReference(pose_ref);
+    geometry_msgs::msg::Pose pose_msg;
+    wolf_controller_utils::affine3dToPose(pose_ref, pose_msg);
+    interactive_marker_server_.setPose(interactive_marker_.name, pose_msg);
 
     // Update the menu entries' check state based on the new base link
     for (auto& tmp_map : map_link_entries_)

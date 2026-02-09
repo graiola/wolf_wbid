@@ -57,6 +57,7 @@ public:
   void publish() override;
   bool reset() override;
 
+
 protected:
 
   void applyExternalKnobs() override;
@@ -152,6 +153,7 @@ private:
   // Realtime buffers
   realtime_tools::RealtimeBuffer<Eigen::Affine3d> buffer_reference_pose_;
   realtime_tools::RealtimeBuffer<Eigen::Matrix<double,6,1>> buffer_reference_twist_;
+
 };
 
 } // namespace wolf_wbid

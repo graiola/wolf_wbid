@@ -29,6 +29,7 @@ find_package(realtime_tools REQUIRED)
 
 include_directories(
     include
+    external
     external/rbdl
     /opt/ros/$ENV{ROS_DISTRO}/include/kdl_parser/  # FIX FOR ROS HUMBLE
     /opt/ros/$ENV{ROS_DISTRO}/include/realtime_tools/ # FIX FOR ROS HUMBLE

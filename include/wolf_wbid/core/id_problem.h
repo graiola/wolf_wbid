@@ -125,6 +125,10 @@ public:
   void setSolver(std::unique_ptr<IQPSolver> solver);
   bool setSolverByName(const std::string& name);
 
+  // Align cartesian references (feet/arms/waist) to current pose after transitions
+  void resetCartesianReferences();
+
+
 private:
 
   bool debug_enabled_{false};
@@ -197,6 +201,7 @@ private:
   // qp + solver
   QPProblem qp_;
   std::unique_ptr<IQPSolver> solver_;
+
 
   // solution buffers
   Eigen::VectorXd x_;

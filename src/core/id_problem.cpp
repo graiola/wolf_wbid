@@ -364,6 +364,26 @@ void IDProblem::reset()
   change_control_mode_ = false;
 }
 
+void IDProblem::resetCartesianReferences()
+{
+  if(!initialized_) return;
+
+  Eigen::VectorXd x_dummy = Eigen::VectorXd::Zero(vars_->size());
+
+  for(auto& kv : arms_) {
+    kv.second->update(x_dummy);
+    kv.second->reset();
+  }
+  for(auto& kv : feet_) {
+    kv.second->update(x_dummy);
+    kv.second->reset();
+  }
+  if(waist_) {
+    waist_->update(x_dummy);
+    waist_->reset();
+  }
+}
+
 void IDProblem::setFootReference(const std::string& foot_name,
                                  const Eigen::Affine3d& pose_ref,
                                  const Eigen::Vector6d& vel_ref,

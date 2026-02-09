@@ -279,13 +279,25 @@ bool CartesianImpl::reset()
   publishWP(waypoints_);
   trj_->reset();
 
-  // init reference buffers from current pose
+  // init reference buffers from current pose (query model to avoid stale cache)
   Eigen::Affine3d pose;
-  getActualPose(pose);
+  bool ok = false;
+  if(getBaseLink() == WORLD_FRAME_NAME)
+    ok = robot_.getPose(getDistalLink(), pose);
+  else
+    ok = robot_.getPose(getDistalLink(), getBaseLink(), pose);
+  if(!ok)
+    getActualPose(pose);
   buffer_reference_pose_.writeFromNonRT(pose);
 
   Eigen::Matrix<double,6,1> twist = Eigen::Matrix<double,6,1>::Zero();
   buffer_reference_twist_.writeFromNonRT(twist);
+
+  // align marker to reference
+  geometry_msgs::Pose pose_msg;
+  affine3dToPose(pose, pose_msg);
+  interactive_marker_server_.setPose(interactive_marker_.name, pose_msg);
+  interactive_marker_server_.applyChanges();
 
   return true;
 }
@@ -570,7 +582,22 @@ void CartesianImpl::changeBaseLink(const visualization_msgs::InteractiveMarkerFe
 
   if(setBaseLink(new_base_link))
   {
-    reset();
+    Eigen::Affine3d pose_ref;
+    getReference(pose_ref);
+    buffer_reference_pose_.writeFromNonRT(pose_ref);
+
+    Eigen::Matrix<double,6,1> twist = Eigen::Matrix<double,6,1>::Zero();
+    buffer_reference_twist_.writeFromNonRT(twist);
+
+    // Refresh marker UI without altering reference
+    clearMarker();
+    makeMarker(getDistalLink(), getBaseLink(),
+               static_cast<unsigned int>(control_type_), true);
+
+    // Keep marker aligned with current reference (avoid jump to origin)
+    geometry_msgs::Pose pose_msg;
+    affine3dToPose(pose_ref, pose_msg);
+    interactive_marker_server_.setPose(interactive_marker_.name, pose_msg);
 
     for (auto& tmp_map : map_link_entries_)
     {
