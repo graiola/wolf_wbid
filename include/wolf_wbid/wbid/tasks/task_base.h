@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <cmath>
 
+#include <wolf_controller_utils/common.h>
+
 namespace wolf_wbid {
 
 /**

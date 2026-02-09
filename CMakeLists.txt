@@ -29,10 +29,13 @@ find_package(realtime_tools REQUIRED)
 
 include_directories(
     include
+    external/rbdl
     /opt/ros/$ENV{ROS_DISTRO}/include/kdl_parser/  # FIX FOR ROS HUMBLE
     /opt/ros/$ENV{ROS_DISTRO}/include/realtime_tools/ # FIX FOR ROS HUMBLE
     /opt/ros/$ENV{ROS_DISTRO}/include/interactive_markers/ # FIX FOR ROS HUMBLE
     external/rbdl/include
+    external/rbdl/addons/urdfreader
+    external/eiQuadProg/include
     external/qpOASES/include
     ${EIGEN3_INCLUDE_DIRS}
     ${tf2_INCLUDE_DIRS}
@@ -46,10 +49,7 @@ include_directories(
 
 link_directories(/opt/ros/$ENV{ROS_DISTRO}/lib/) # FIX FOR ROS HUMBLE
 
-# ADVR Packages
-# (third_party removed)
-
-# Solvers
+# External projects
 add_subdirectory(external/rbdl)
 add_subdirectory(external/eiQuadProg)
 add_subdirectory(external/qpOASES)
@@ -62,7 +62,9 @@ if(${catkin_FOUND})
     catkin_package(
       INCLUDE_DIRS
         include
+        external/rbdl
         external/rbdl/include
+        external/rbdl/addons/urdfreader
         external/eiQuadProg/include
         external/qpOASES/include
       LIBRARIES
@@ -87,7 +89,9 @@ elseif(${ament_cmake_FOUND})
     set(TASK_WRAPPERS_FOLDER "ros2")
     ament_export_include_directories(
         include
+        external/rbdl
         external/rbdl/include
+        external/rbdl/addons/urdfreader
         external/eiQuadProg/include
         external/qpOASES/include)
     ament_export_dependencies(wolf_msgs wolf_controller_utils interactive_markers realtime_tools kdl_parser)
@@ -168,6 +172,13 @@ target_link_libraries(id_problem
 install(
   DIRECTORY include/${PROJECT_NAME}
   DESTINATION ${CMAKE_INSTALL_PREFIX}/include
+)
+
+# RBDL addon header (needed by quadruped_robot_rbdl.h)
+install(
+  DIRECTORY external/rbdl/addons/urdfreader/
+  DESTINATION ${CMAKE_INSTALL_PREFIX}/include/rbdl/addons/urdfreader
+  FILES_MATCHING PATTERN "urdfreader.h"
 )
 
 install(TARGETS
