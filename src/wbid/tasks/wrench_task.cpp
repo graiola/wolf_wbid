@@ -31,9 +31,13 @@ WrenchTask::WrenchTask(const std::string& task_id,
   // A = [ 0 ... I3(at cb_.offset) ... 0 ]
   A_.setZero();
   A_.block(0, cb_.offset, 3, 3).setIdentity();
+  A_base_ = A_;
 
   // Default weights: ones * weight_scalar
   setWeightScalar(weight_scalar);
+
+  // Default "lambda-like" gain
+  setLambda(1.0, 0.0);
 
   // Reference default
   b_.setZero();
@@ -51,16 +55,21 @@ void WrenchTask::setReference(const Eigen::Vector3d& f_ref)
 
 void WrenchTask::update(const Eigen::VectorXd& /*x*/)
 {
-  // A is constant, b is current reference.
+  // A is a scaled selector, b is the scaled reference.
   // (No need to read x here; IDProblem uses A,b,wDiag to build H,g.)
-  // Keep b synced with reference:
-  b_ = f_ref_;
+  // Use lambda1 as an extra gain (legacy behavior).
+  double gain = getLambda1();
+  if(!(gain > 0.0)) gain = 1.0;
+
+  A_ = gain * A_base_;
+  b_ = gain * f_ref_;
 }
 
 bool WrenchTask::reset()
 {
   f_ref_.setZero();
   b_.setZero();
+  A_ = A_base_;
   return true;
 }
 

@@ -49,6 +49,9 @@ private:
 
   // Cached block info
   IDVariables::Block cb_;
+
+  // Keep a copy of the selection matrix so we can scale by lambda at runtime
+  Eigen::MatrixXd A_base_;
 };
 
 } // namespace wolf_wbid

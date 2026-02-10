@@ -27,12 +27,19 @@ WrenchImpl::WrenchImpl(const std::string& robot_name,
                                  &WrenchImpl::referenceCallback, this);
 
   // init buffer from task
+  buffer_lambda1_ = this->getLambda1();
   buffer_weight_diag_ = this->weight();
 }
 
 void WrenchImpl::registerReconfigurableVariables()
 {
+  const double lambda1 = this->getLambda1();
   const double w = this->weight();
+
+  ddr_server_->registerVariable<double>(
+        "set_lambda_1", lambda1,
+        boost::bind(&TaskWrapperInterface::setLambda1, this, _1),
+        "set lambda 1", 0.0, 1000.0);
 
   ddr_server_->registerVariable<double>(
         "set_weight_diag", w,
@@ -44,22 +51,30 @@ void WrenchImpl::registerReconfigurableVariables()
 
 void WrenchImpl::loadParams()
 {
-  double weight;
+  double lambda1, weight;
+
+  if(!nh_.getParam("gains/" + task_name_ + "/lambda1", lambda1))
+    lambda1 = this->getLambda1();
 
   if(!nh_.getParam("gains/" + task_name_ + "/weight", weight))
     weight = this->weight();
 
-  if(weight < 0.0)
-    throw std::runtime_error("WrenchImpl::loadParams(): weight must be >= 0");
+  if(lambda1 < 0.0 || weight < 0.0)
+    throw std::runtime_error("WrenchImpl::loadParams(): lambda/weight must be >= 0");
 
+  buffer_lambda1_ = lambda1;
   buffer_weight_diag_ = weight;
 
   // apply immediately
+  this->setLambda(lambda1, 0.0);
   this->setWeight(weight);
 }
 
 void WrenchImpl::applyExternalKnobs()
 {
+  if(OPTIONS.set_ext_lambda)
+    this->setLambda(buffer_lambda1_.load(), 0.0);
+
   if(OPTIONS.set_ext_weight)
     this->setWeight(buffer_weight_diag_.load());
 
@@ -149,6 +164,7 @@ bool WrenchImpl::reset()
   has_last_f_act_ = false;
   last_f_act_.setZero();
 
+  buffer_lambda1_ = this->getLambda1();
   buffer_weight_diag_ = this->weight();
   return true;
 }
