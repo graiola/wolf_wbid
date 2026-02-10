@@ -211,16 +211,18 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
 
   // -------------------- Constraints --------------------
   constraints_.clear();
+  constraints_ext_.clear();
 
-  // Friction cones
+  // Friction cones (shared by WPG + EXT)
   friction_cones_.clear();
   for(const auto& fn : foot_names_) {
     auto fc = std::make_shared<FrictionConeConstraint>(fn, *vars_, mu_, fc_R_);
     friction_cones_[fn] = fc;
     constraints_.push_back(fc);
+    constraints_ext_.push_back(fc);
   }
 
-  // Force bounds
+  // Force bounds (WPG only)
   force_bounds_.clear();
   for(const auto& fn : foot_names_) {
     Eigen::Vector3d fmin(x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_);
@@ -230,7 +232,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     constraints_.push_back(cb);
   }
 
-  // Torque limits
+  // Torque limits (WPG only)
   {
     Eigen::VectorXd tau_max;
     model_->getEffortLimits(tau_max);
@@ -246,6 +248,15 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     );
     constraints_.push_back(torque_limits_);
   }
+
+  // Dynamics equality (EXT only)
+  dynamics_eq_ = std::make_shared<DynamicsEqualityConstraint>(
+    "dynamics",
+    *model_,
+    *vars_,
+    foot_names_
+  );
+  constraints_ext_.push_back(dynamics_eq_);
 
   // Optional constraints left disabled by default:
   // base_accel_z_  / base_accel_fb_
@@ -498,6 +509,9 @@ void IDProblem::update()
         const auto& fn = foot_names_[i];
         if(i < contact_wrenches_.size()) wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
         feet_[fn]->setLambda(1., 1.);
+        // Keep all contacts enabled in EXT (legacy behavior: no swing/stance gating from planner)
+        contact_enabled_[fn] = true;
+        if(dynamics_eq_) dynamics_eq_->enableContact(fn);
       }
       waist_->setReference(model_->getBasePoseInWorld());
       model_->getCOM(tmp_vector3d_);
@@ -671,6 +685,8 @@ bool IDProblem::buildQP(QPProblem& qp)
     }
   }
 
+  const mode_t mode = (control_mode_.load() == EXT) ? EXT : WPG;
+
   // -------- Tasks -> objective --------
 
   // Feet: position only (xyz)
@@ -685,11 +701,14 @@ bool IDProblem::buildQP(QPProblem& qp)
     addLeastSquaresTerm(qp, t.A(), t.b(), t.wDiag());
   }
 
-  // Waist + CoM split logic
-  {
+  if(mode == EXT) {
+    // EXT stack: waist full 6D, no CoM
+    const auto& w = *waist_;
+    addLeastSquaresTerm(qp, w.A(), w.b(), w.wDiag());
+  } else {
+    // WPG stack: waist/com split
     const auto& w = *waist_;
     const auto& c = *com_;
-
     if(activate_com_z_) {
       addLeastSquaresRows(qp, w.A(), w.b(), w.wDiag(), rowsRPY());
       addLeastSquaresRows(qp, c.A(), c.b(), c.wDiag(), rowsXYZ());
@@ -701,7 +720,7 @@ bool IDProblem::buildQP(QPProblem& qp)
     }
   }
 
-  // Wrench tracking (optional: keep if you want to preserve EXT behavior; usually enabled by params)
+  // Wrench tracking (force only)
   for(const auto& fn : foot_names_) {
     const auto& t = *wrenches_.at(fn);
     addLeastSquaresTerm(qp, t.A(), t.b(), t.wDiag());
@@ -724,12 +743,13 @@ bool IDProblem::buildQP(QPProblem& qp)
   }
 
   // -------- Constraints update + merge --------
-  for(const auto& c : constraints_) {
+  const auto& active_constraints = (mode == EXT) ? constraints_ext_ : constraints_;
+  for(const auto& c : active_constraints) {
     if(!c) continue;
     if(!c->enabled()) continue;
     c->update(x_);
   }
-  applyConstraintContributions(qp, constraints_);
+  applyConstraintContributions(qp, active_constraints);
 
   return true;
 }

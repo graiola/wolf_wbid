@@ -187,8 +187,9 @@ private:
   // variables
   std::unique_ptr<IDVariables> vars_;
 
-  // constraints (single set)
-  std::vector<std::shared_ptr<IConstraint>> constraints_;
+  // constraints per mode
+  std::vector<std::shared_ptr<IConstraint>> constraints_;      // WPG stack
+  std::vector<std::shared_ptr<IConstraint>> constraints_ext_;  // EXT stack
 
   // per-contact constraints for toggling
   std::map<std::string, std::shared_ptr<FrictionConeConstraint>> friction_cones_;
