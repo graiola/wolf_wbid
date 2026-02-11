@@ -48,7 +48,7 @@ class IDProblem
 {
 public:
   /** @brief Control stack mode. */
-  enum mode_t { WPG = 0, EXT, MPC };
+  enum mode_t { WPG = 0, EXT };
 
   const std::string CLASS_NAME = "IDProblem";
 
