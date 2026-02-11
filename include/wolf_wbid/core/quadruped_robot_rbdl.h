@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Gennaro Raiola
+ */
+
 /**
 WoLF: WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 **/

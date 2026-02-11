@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Gennaro Raiola
+ */
+
 // wolf_wbid/wbid/constraints/torque_limits_constraint.h
 #pragma once
 

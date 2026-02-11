@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Gennaro Raiola
+ */
+
 #pragma once
 #ifndef WOLF_WBID_POSTURAL_TASK_H
 #define WOLF_WBID_POSTURAL_TASK_H

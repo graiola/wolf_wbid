@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Gennaro Raiola
+ */
+
 #pragma once
 #include <wolf_wbid/wbid/qp/qp_solver.h>
 

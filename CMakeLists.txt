@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.5)
 project(wolf_wbid)
 
+option(WOLF_WBID_ENABLE_EIQUADPROG "Build with eiQuadProg (GPL)" OFF)
+
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-std=c++17" COMPILER_SUPPORTS_CXX17)
 check_cxx_compiler_flag("-std=c++14" COMPILER_SUPPORTS_CXX14)
@@ -27,6 +29,16 @@ find_package(wolf_controller_utils REQUIRED)
 find_package(interactive_markers REQUIRED)
 find_package(realtime_tools REQUIRED)
 
+set(WOLF_WBID_EIQUADPROG_INCLUDE_DIRS "")
+set(WOLF_WBID_EIQUADPROG_LIBRARIES "")
+set(WOLF_WBID_ID_EIQUADPROG_SOURCES "")
+
+if(WOLF_WBID_ENABLE_EIQUADPROG)
+    list(APPEND WOLF_WBID_EIQUADPROG_INCLUDE_DIRS external/eiQuadProg/include)
+    list(APPEND WOLF_WBID_EIQUADPROG_LIBRARIES eiQuadProg)
+    list(APPEND WOLF_WBID_ID_EIQUADPROG_SOURCES src/wbid/qp/eiquadprog_solver.cpp)
+endif()
+
 include_directories(
     include
     external
@@ -36,8 +48,8 @@ include_directories(
     /opt/ros/$ENV{ROS_DISTRO}/include/interactive_markers/ # FIX FOR ROS HUMBLE
     external/rbdl/include
     external/rbdl/addons/urdfreader
-    external/eiQuadProg/include
     external/qpOASES/include
+    ${WOLF_WBID_EIQUADPROG_INCLUDE_DIRS}
     ${EIGEN3_INCLUDE_DIRS}
     ${tf2_INCLUDE_DIRS}
     ${tf2_ros_INCLUDE_DIRS}
@@ -52,8 +64,10 @@ link_directories(/opt/ros/$ENV{ROS_DISTRO}/lib/) # FIX FOR ROS HUMBLE
 
 # External projects
 add_subdirectory(external/rbdl)
-add_subdirectory(external/eiQuadProg)
 add_subdirectory(external/qpOASES)
+if(WOLF_WBID_ENABLE_EIQUADPROG)
+    add_subdirectory(external/eiQuadProg)
+endif()
 
 # ROS
 find_package(catkin QUIET)
@@ -66,8 +80,8 @@ if(${catkin_FOUND})
         external/rbdl
         external/rbdl/include
         external/rbdl/addons/urdfreader
-        external/eiQuadProg/include
         external/qpOASES/include
+        ${WOLF_WBID_EIQUADPROG_INCLUDE_DIRS}
       LIBRARIES
         quadruped_robot
         cartesian_trajectory
@@ -75,8 +89,8 @@ if(${catkin_FOUND})
         task_wrappers
         rbdl
         rbdl_urdfreader
-        eiQuadProg
         qpOASES
+        ${WOLF_WBID_EIQUADPROG_LIBRARIES}
       CATKIN_DEPENDS
         wolf_msgs
         wolf_controller_utils
@@ -93,8 +107,8 @@ elseif(${ament_cmake_FOUND})
         external/rbdl
         external/rbdl/include
         external/rbdl/addons/urdfreader
-        external/eiQuadProg/include
-        external/qpOASES/include)
+        external/qpOASES/include
+        ${WOLF_WBID_EIQUADPROG_INCLUDE_DIRS})
     ament_export_dependencies(wolf_msgs wolf_controller_utils interactive_markers realtime_tools kdl_parser)
     ament_export_libraries(
         quadruped_robot
@@ -103,8 +117,8 @@ elseif(${ament_cmake_FOUND})
         task_wrappers
         rbdl
         rbdl_urdfreader
-        eiQuadProg
-        qpOASES)
+        qpOASES
+        ${WOLF_WBID_EIQUADPROG_LIBRARIES})
     ament_package()
     add_definitions(-DROS2)
     message(STATUS "Add ROS2 definition")
@@ -147,7 +161,7 @@ add_library(id_problem SHARED
     src/core/id_problem.cpp
     src/core/task_interface.cpp
     src/wbid/id_variables.cpp
-    src/wbid/qp/eiquadprog_solver.cpp
+    ${WOLF_WBID_ID_EIQUADPROG_SOURCES}
     src/wbid/qp/qpoases_solver.cpp
     src/wbid/qp/qp_solver_factory.cpp
     src/wbid/constraints/friction_cone_constraint.cpp
@@ -166,8 +180,14 @@ add_library(id_problem SHARED
 target_link_libraries(id_problem
     quadruped_robot 
     task_wrappers 
-    eiQuadProg
-    qpOASES)
+    qpOASES
+    ${WOLF_WBID_EIQUADPROG_LIBRARIES})
+
+if(WOLF_WBID_ENABLE_EIQUADPROG)
+    target_compile_definitions(id_problem PRIVATE WOLF_WBID_HAS_EIQUADPROG=1)
+else()
+    target_compile_definitions(id_problem PRIVATE WOLF_WBID_HAS_EIQUADPROG=0)
+endif()
 
 # Installation
 install(
@@ -189,8 +209,8 @@ install(TARGETS
         cartesian_trajectory
         id_problem
         task_wrappers
-        eiQuadProg
         qpOASES
+        ${WOLF_WBID_EIQUADPROG_LIBRARIES}
         DESTINATION lib/${PROJECT_NAME}
         LIBRARY DESTINATION lib
 )
