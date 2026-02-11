@@ -15,7 +15,7 @@
 
 #include <wolf_controller_utils/trajectory/trajectory.h>
 
-// OpenSoT-free task (forward decl is enough here)
+// Forward declaration is enough in this header.
 namespace wolf_wbid {
 class CartesianTask;
 }
@@ -23,11 +23,16 @@ class CartesianTask;
 namespace wolf_wbid
 {
 
+/**
+ * @brief Time-parameterized Cartesian trajectory helper for a CartesianTask.
+ */
 class CartesianTrajectory
 {
 public:
+  /** @brief Trajectory execution state. */
   enum state_t { IDLE = 0, EXECUTING };
 
+  /** @brief Cartesian waypoint with pose and segment duration. */
   struct WayPoint
   {
     Eigen::Affine3d T_ref{Eigen::Affine3d::Identity()};
@@ -41,22 +46,33 @@ public:
   using Ptr = std::shared_ptr<CartesianTrajectory>;
   using ConstPtr = std::shared_ptr<const CartesianTrajectory>;
 
+  /**
+   * @brief Constructs the trajectory helper.
+   * @param task_ptr Optional task pointer used for proximity checks and reset behavior.
+   */
   explicit CartesianTrajectory(wolf_wbid::CartesianTask* task_ptr = nullptr);
 
+  /** @brief Sets the task used by this trajectory helper. */
   void setTask(wolf_wbid::CartesianTask* task_ptr);
 
+  /** @brief Advances the internal trajectory clock and state. */
   void update(double period);
+  /** @brief Clears waypoints and resets execution state. */
   void reset();
 
+  /** @brief Returns elapsed trajectory time in seconds. */
   double getTime() const;
 
   bool getReference(Eigen::Affine3d& T_ref,
                     Eigen::Matrix<double,6,1>* vel_ref = nullptr,
                     Eigen::Matrix<double,6,1>* acc_ref = nullptr) const;
 
+  /** @brief Appends a waypoint segment. */
   bool setWayPoint(const Eigen::Affine3d& T_ref, double duration);
+  /** @brief Replaces the trajectory with a sequence of waypoints. */
   bool setWayPoints(const WayPointVector& wps);
 
+  /** @brief Returns the current execution state. */
   state_t getState() const;
 
 private:

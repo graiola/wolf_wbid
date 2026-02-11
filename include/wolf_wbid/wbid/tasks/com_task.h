@@ -18,7 +18,7 @@ namespace wolf_wbid {
 class QuadrupedRobot;
 
 /**
- * @brief CoM acceleration task (3D):
+ * @brief CoM acceleration tracking task (3D).
  *
  * Model:
  *   pdd_com = Jcom * qddot + Jdotcom*qd
@@ -37,7 +37,7 @@ public:
           const IDVariables& vars);
 
   const std::string& getBaseLink() const { return base_link_; }
-  void setBaseLink(const std::string& base) { base_link_ = base; } // kept for msg frame compat
+  void setBaseLink(const std::string& base) { base_link_ = base; } // Maintained for message-frame compatibility.
 
   // reference API
   void setReference(const Eigen::Vector3d& p_ref, const Eigen::Vector3d& v_ref);
@@ -51,7 +51,7 @@ public:
   const Eigen::Vector3d& posError() const { return e_p_; }
   const Eigen::Vector3d& velError() const { return e_v_; }
 
-  void update(const Eigen::VectorXd& x) override;
+  void update() override;
   bool reset() override;
 
   // 3x3 gains helpers
@@ -84,6 +84,9 @@ private:
   // errors
   Eigen::Vector3d e_p_{Eigen::Vector3d::Zero()};
   Eigen::Vector3d e_v_{Eigen::Vector3d::Zero()};
+
+  // preallocated runtime buffers (RT-safe update path)
+  Eigen::MatrixXd Jcom_;
 };
 
 } // namespace wolf_wbid

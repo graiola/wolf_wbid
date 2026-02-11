@@ -23,7 +23,7 @@ namespace wolf_wbid {
  * So:
  *   A is (3 x nvars) selecting the contact force block
  *   b is (3) equal to f_ref
- * wDiag is (3) usually constant diag = weight
+ * `wDiag` is (3), usually a constant diagonal weight.
  */
 class WrenchTask : public TaskBase
 {
@@ -39,11 +39,11 @@ public:
   void setReference(const Eigen::Vector3d& f_ref);
   const Eigen::Vector3d& reference() const { return f_ref_; }
 
-  // scalar weight helper (legacy wrappers use this)
+  // Scalar weight helper for wrappers.
   double weight() const { return getWeightScalar(); }
   void setWeight(double w) { setWeightScalar(w); }
 
-  void update(const Eigen::VectorXd& x) override;
+  void update() override;
   bool reset() override;
 
 private:

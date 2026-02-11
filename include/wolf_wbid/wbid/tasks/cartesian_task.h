@@ -37,8 +37,8 @@ class QuadrupedRobot;
  *
  * GainType:
  *  - Acceleration: uses PD as above
- *  - Force: currently same acceleration-level PD (kept for compatibility);
- *          you can later replace it with an impedance->wrench mapping if desired.
+ *  - Force: currently uses the same acceleration-level PD.
+ *    It can be replaced later with an impedance-to-wrench mapping if needed.
  */
 class CartesianTask : public TaskBase
 {
@@ -75,7 +75,7 @@ public:
   const Eigen::Matrix<double,6,1>& getVelocityError() const { return e6_vel_; }
 
   // update
-  void update(const Eigen::VectorXd& x) override;
+  void update() override;
   bool reset() override;
 
   // convenience: set Kp/Kd as 6x6
@@ -83,7 +83,7 @@ public:
   void setKd(const Eigen::Matrix<double,6,6>& Kd6) { TaskBase::setKd(Kd6); }
 
 protected:
-  // ---- Adapt these if your QuadrupedRobot uses different names ----
+  // Adapt these hooks if your QuadrupedRobot backend uses different APIs.
   virtual void getJacobian6(const std::string& link, Eigen::MatrixXd& J6) const;
   virtual void getJacobianDotTimesQdot6(const std::string& link,
                                         Eigen::Matrix<double,6,1>& Jdot_qdot) const;
@@ -115,6 +115,11 @@ private:
   // errors
   Eigen::Matrix<double,6,1> e6_pos_{Eigen::Matrix<double,6,1>::Zero()};
   Eigen::Matrix<double,6,1> e6_vel_{Eigen::Matrix<double,6,1>::Zero()};
+
+  // preallocated runtime buffers (RT-safe update path)
+  Eigen::MatrixXd J6_;
+  Eigen::MatrixXd Bi_;
+  Eigen::MatrixXd tmp6xn_;
 };
 
 } // namespace wolf_wbid

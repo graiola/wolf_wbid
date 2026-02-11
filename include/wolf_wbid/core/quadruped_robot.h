@@ -27,6 +27,9 @@
 namespace wolf_wbid
 {
 
+/**
+ * @brief Abstract robot model interface used by WBID tasks and constraints.
+ */
 class QuadrupedRobot
 {
 
@@ -157,7 +160,7 @@ public:
    */
   virtual const Eigen::VectorXd& getStandUpJointPostion() = 0;
 
-  /*
+  /**
    * @brief get robot's home position when standing down
    * @return q_stand_down
    */
@@ -199,8 +202,14 @@ public:
   virtual bool getPose(const Eigen::VectorXd& q, const std::string& source_frame, Eigen::Affine3d& pose) = 0;
 
 
-    /**
-  * @brief TODO
+  /**
+  * @brief Computes the Jacobian of `target_link_name` relative to `base_link_name`.
+  *
+  * @param q The joint positions.
+  * @param target_link_name The target link.
+  * @param base_link_name The base link.
+  * @param J The relative Jacobian matrix.
+  * @return True if both links are valid. False otherwise.
   */
   virtual bool getRelativeJacobian(const Eigen::VectorXd& q, const std::string& target_link_name, const std::string& base_link_name, Eigen::MatrixXd& J) = 0;
 
@@ -312,6 +321,6 @@ public:
 
 };
 
-} //@namespace wolf_controller
+} // namespace wolf_wbid
 
-#endif //QUADRUPED_ROBOT_H
+#endif // WOLF_WBID_QUADRUPED_ROBOT_H

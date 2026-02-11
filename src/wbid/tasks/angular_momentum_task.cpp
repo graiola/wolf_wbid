@@ -66,7 +66,7 @@ bool AngularMomentumTask::reset()
   return true;
 }
 
-void AngularMomentumTask::update(const Eigen::VectorXd& /*x*/)
+void AngularMomentumTask::update()
 {
   if(!enabled()) {
     b_.setZero();

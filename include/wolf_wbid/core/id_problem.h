@@ -4,14 +4,12 @@
  */
 
 /**
- * WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
+ * @brief Whole-body inverse-dynamics problem orchestrator.
  *
- * OpenSoT-free WBID orchestrator:
- *  - uses IDVariables for variable layout
- *  - each task provides (A,b,W) for least-squares terms
- *  - constraints contribute:
- *      * linear constraints (A,lA,uA) through IConstraint
- *      * variable bounds (l,u) through ConstraintBase (dynamic_cast)
+ * The class assembles and solves the QP by collecting:
+ * - least-squares terms from tasks (`A`, `b`, `W`)
+ * - linear constraints (`A`, `lA`, `uA`)
+ * - variable bounds (`l`, `u`)
  */
 
 #pragma once
@@ -49,6 +47,7 @@ namespace wolf_wbid {
 class IDProblem
 {
 public:
+  /** @brief Control stack mode. */
   enum mode_t { WPG = 0, EXT, MPC };
 
   const std::string CLASS_NAME = "IDProblem";
@@ -125,7 +124,8 @@ public:
   const Cartesian::Ptr& getWaistTask() const;
   const Com::Ptr& getComTask() const;
 
-  void setControlMode(mode_t mode); // kept for compatibility (WPG only used)
+  /** @brief Sets the active control mode. */
+  void setControlMode(mode_t mode);
 
   void setSolver(std::unique_ptr<IQPSolver> solver);
   bool setSolverByName(const std::string& name);
@@ -169,7 +169,8 @@ private:
                            const Eigen::MatrixXd& A,
                            const Eigen::VectorXd& b,
                            const Eigen::VectorXd& w_diag,
-                           const std::vector<int>& rows);
+                           const int* rows,
+                           int rows_count);
 
   // constraints helper (supports bounds via dynamic_cast to ConstraintBase)
   void applyConstraintContributions(QPProblem& qp,
@@ -207,6 +208,9 @@ private:
   // qp + solver
   QPProblem qp_;
   std::unique_ptr<IQPSolver> solver_;
+  int qp_m_wpg_{0};
+  int qp_m_ext_{0};
+  int qp_m_max_{0};
 
 
   // solution buffers

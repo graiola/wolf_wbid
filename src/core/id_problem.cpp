@@ -7,6 +7,7 @@
 #include <limits>
 #include <algorithm>
 #include <cmath>
+#include <array>
 
 // Wrappers (ROS1/ROS2)
 #ifdef ROS
@@ -27,18 +28,9 @@ namespace wolf_wbid {
 
 static inline double kBig() { return 1.0e20; }
 
-static inline std::vector<int> rowsXYZ() { return {0,1,2}; }
-static inline std::vector<int> rowsXY()  { return {0,1}; }
-static inline std::vector<int> rowsZ()   { return {2}; }
-static inline std::vector<int> rowsRPY() { return {3,4,5}; }
-static inline std::vector<int> rowsLimbs(int n)
-{
-  std::vector<int> rows;
-  if(n <= FLOATING_BASE_DOFS) return rows;
-  rows.reserve(n - FLOATING_BASE_DOFS);
-  for(int i = FLOATING_BASE_DOFS; i < n; ++i) rows.push_back(i);
-  return rows;
-}
+static constexpr std::array<int,3> kRowsXYZ{{0,1,2}};
+static constexpr std::array<int,2> kRowsXY{{0,1}};
+static constexpr std::array<int,3> kRowsRPY{{3,4,5}};
 
 /**
  * Block regularization:
@@ -270,6 +262,28 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   qddot_.setZero(model_->getJointNum());
   contact_wrenches_.resize(foot_names_.size(), Eigen::Vector6d::Zero());
 
+  // Preallocate QP workspace once to avoid runtime reallocations.
+  const auto sumConstraintRows = [](const std::vector<std::shared_ptr<IConstraint>>& cs) {
+    int total = 0;
+    for(const auto& c : cs) {
+      if(!c) continue;
+      total += c->rows();
+    }
+    return total;
+  };
+
+  qp_m_wpg_ = sumConstraintRows(constraints_);
+  qp_m_ext_ = sumConstraintRows(constraints_ext_);
+  qp_m_max_ = std::max(qp_m_wpg_, qp_m_ext_);
+
+  qp_.H.setZero(vars_->size(), vars_->size());
+  qp_.g.setZero(vars_->size());
+  qp_.A.setZero(qp_m_max_, vars_->size());
+  qp_.lA.setConstant(qp_m_max_, -kBig());
+  qp_.uA.setConstant(qp_m_max_,  kBig());
+  qp_.l.setConstant(vars_->size(), -kBig());
+  qp_.u.setConstant(vars_->size(),  kBig());
+
   // Mode
   control_mode_ = WPG;
   change_control_mode_ = true;
@@ -364,13 +378,13 @@ void IDProblem::activateExternalReferences(bool activate)
 void IDProblem::reset()
 {
   // Wrapper reset (kept as in your pattern)
-  for(auto& kv : arms_)     { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
-  for(auto& kv : feet_)     { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
-  for(auto& kv : wrenches_) { kv.second->update(Eigen::VectorXd(1)); kv.second->reset(); }
-  waist_->update(Eigen::VectorXd(1));      waist_->reset();
-  com_->update(Eigen::VectorXd(1));        com_->reset();
-  postural_->update(Eigen::VectorXd(1));   postural_->reset();
-  angular_momentum_->update(Eigen::VectorXd(1)); angular_momentum_->reset();
+  for(auto& kv : arms_)     { kv.second->update(); kv.second->reset(); }
+  for(auto& kv : feet_)     { kv.second->update(); kv.second->reset(); }
+  for(auto& kv : wrenches_) { kv.second->update(); kv.second->reset(); }
+  waist_->update();      waist_->reset();
+  com_->update();        com_->reset();
+  postural_->update();   postural_->reset();
+  angular_momentum_->update(); angular_momentum_->reset();
 
   change_control_mode_ = false;
 }
@@ -379,18 +393,16 @@ void IDProblem::resetCartesianReferences()
 {
   if(!initialized_) return;
 
-  Eigen::VectorXd x_dummy = Eigen::VectorXd::Zero(vars_->size());
-
   for(auto& kv : arms_) {
-    kv.second->update(x_dummy);
+    kv.second->update();
     kv.second->reset();
   }
   for(auto& kv : feet_) {
-    kv.second->update(x_dummy);
+    kv.second->update();
     kv.second->reset();
   }
   if(waist_) {
-    waist_->update(x_dummy);
+    waist_->update();
     waist_->reset();
   }
 }
@@ -537,15 +549,14 @@ void IDProblem::update()
     }
   }
 
-  // Tasks update with dummy x (deterministic and keeps A/b current for debug)
-  Eigen::VectorXd x_dummy = Eigen::VectorXd::Zero(vars_->size());
-  for(auto& kv : feet_)     kv.second->update(x_dummy);
-  for(auto& kv : arms_)     kv.second->update(x_dummy);
-  for(auto& kv : wrenches_) kv.second->update(x_dummy);
-  waist_->update(x_dummy);
-  com_->update(x_dummy);
-  postural_->update(x_dummy);
-  angular_momentum_->update(x_dummy);
+  // Tasks update (deterministic and allocation-free in the hot path).
+  for(auto& kv : feet_)     kv.second->update();
+  for(auto& kv : arms_)     kv.second->update();
+  for(auto& kv : wrenches_) kv.second->update();
+  waist_->update();
+  com_->update();
+  postural_->update();
+  angular_momentum_->update();
 }
 
 void IDProblem::setDefaultBounds(QPProblem& qp)
@@ -575,13 +586,11 @@ void IDProblem::addLeastSquaresTerm(QPProblem& qp,
   if(A.cols() != qp.n()) throw std::runtime_error("addLeastSquaresTerm: A cols mismatch");
   if(w_diag.size() != m) throw std::runtime_error("addLeastSquaresTerm: w size mismatch");
 
-  const Eigen::VectorXd w_eff = w_diag.array().square().matrix();
-
   // Compute H and g without forming diag(w)
   // H += Σ w_i * a_iᵀ a_i
   // g += -Σ w_i * a_iᵀ b_i
   for(int i = 0; i < m; ++i) {
-    const double wi = w_eff(i);
+    const double wi = w_diag(i) * w_diag(i);
     if(wi <= 0.0) continue;
     // rank-1 update: H += wi * aᵀ a
     qp.H.noalias() += wi * (A.row(i).transpose() * A.row(i));
@@ -593,7 +602,8 @@ void IDProblem::addLeastSquaresRows(QPProblem& qp,
                                     const Eigen::MatrixXd& A,
                                     const Eigen::VectorXd& b,
                                     const Eigen::VectorXd& w_diag,
-                                    const std::vector<int>& rows)
+                                    const int* rows,
+                                    int rows_count)
 {
   const int m = static_cast<int>(b.size());
   if(m == 0) return;
@@ -601,11 +611,10 @@ void IDProblem::addLeastSquaresRows(QPProblem& qp,
   if(A.cols() != qp.n()) throw std::runtime_error("addLeastSquaresRows: A cols mismatch");
   if(w_diag.size() != m) throw std::runtime_error("addLeastSquaresRows: w size mismatch");
 
-  const Eigen::VectorXd w_eff = w_diag.array().square().matrix();
-
-  for(const int ri : rows) {
+  for(int i = 0; i < rows_count; ++i) {
+    const int ri = rows[i];
     if(ri < 0 || ri >= m) continue;
-    const double wi = w_eff(ri);
+    const double wi = w_diag(ri) * w_diag(ri);
     if(wi <= 0.0) continue;
     qp.H.noalias() += wi * (A.row(ri).transpose() * A.row(ri));
     qp.g.noalias() += (-wi * b(ri)) * A.row(ri).transpose();
@@ -615,6 +624,10 @@ void IDProblem::addLeastSquaresRows(QPProblem& qp,
 void IDProblem::applyConstraintContributions(QPProblem& qp,
                                              const std::vector<std::shared_ptr<IConstraint>>& constraints)
 {
+  qp.A.setZero();
+  qp.lA.setConstant(-kBig());
+  qp.uA.setConstant( kBig());
+
   // 1) Merge bounds contributions (ConstraintBase only)
   for(const auto& c : constraints) {
     if(!c) continue;
@@ -631,41 +644,38 @@ void IDProblem::applyConstraintContributions(QPProblem& qp,
   }
 
   // 2) Stack linear constraints
-  int m_total = 0;
-  for(const auto& c : constraints) {
-    if(!c) continue;
-    if(!c->enabled()) continue;
-    m_total += c->rows();
-  }
-
-  qp.A.resize(m_total, qp.n());
-  qp.lA.resize(m_total);
-  qp.uA.resize(m_total);
-
   int row = 0;
   for(const auto& c : constraints) {
     if(!c) continue;
-    if(!c->enabled()) continue;
 
     const int mi = c->rows();
     if(mi <= 0) continue;
+    if(row + mi > qp.m())
+      throw std::runtime_error("Constraint rows exceed preallocated QP rows in " + c->name());
 
     if(c->cols() != qp.n())
       throw std::runtime_error("Constraint cols mismatch in " + c->name());
 
-    if(c->A().rows() != mi || c->A().cols() != qp.n())
-      throw std::runtime_error("Constraint A size mismatch in " + c->name());
-
-    qp.A.block(row, 0, mi, qp.n()) = c->A();
-    qp.lA.segment(row, mi) = c->lA();
-    qp.uA.segment(row, mi) = c->uA();
+    if(c->enabled()) {
+      if(c->A().rows() != mi || c->A().cols() != qp.n())
+        throw std::runtime_error("Constraint A size mismatch in " + c->name());
+      qp.A.block(row, 0, mi, qp.n()) = c->A();
+      qp.lA.segment(row, mi) = c->lA();
+      qp.uA.segment(row, mi) = c->uA();
+    } else {
+      qp.A.block(row, 0, mi, qp.n()).setZero();
+      qp.lA.segment(row, mi).setConstant(-kBig());
+      qp.uA.segment(row, mi).setConstant( kBig());
+    }
     row += mi;
   }
 }
 
 bool IDProblem::buildQP(QPProblem& qp)
 {
-  qp.resize(vars_->size(), 0);
+  if(qp.n() != vars_->size() || qp.m() != qp_m_max_)
+    throw std::runtime_error("IDProblem::buildQP(): QP workspace not initialized");
+
   setDefaultBounds(qp);
 
   qp.H.setZero();
@@ -692,7 +702,7 @@ bool IDProblem::buildQP(QPProblem& qp)
   // Feet: position only (xyz)
   for(const auto& fn : foot_names_) {
     const auto& t = *feet_.at(fn);
-    addLeastSquaresRows(qp, t.A(), t.b(), t.wDiag(), rowsXYZ());
+    addLeastSquaresRows(qp, t.A(), t.b(), t.wDiag(), kRowsXYZ.data(), static_cast<int>(kRowsXYZ.size()));
   }
 
   // Arms: full 6D
@@ -710,13 +720,13 @@ bool IDProblem::buildQP(QPProblem& qp)
     const auto& w = *waist_;
     const auto& c = *com_;
     if(activate_com_z_) {
-      addLeastSquaresRows(qp, w.A(), w.b(), w.wDiag(), rowsRPY());
-      addLeastSquaresRows(qp, c.A(), c.b(), c.wDiag(), rowsXYZ());
+      addLeastSquaresRows(qp, w.A(), w.b(), w.wDiag(), kRowsRPY.data(), static_cast<int>(kRowsRPY.size()));
+      addLeastSquaresRows(qp, c.A(), c.b(), c.wDiag(), kRowsXYZ.data(), static_cast<int>(kRowsXYZ.size()));
     } else {
-      auto wzrpy = rowsRPY();
-      wzrpy.insert(wzrpy.begin(), 2); // include z
-      addLeastSquaresRows(qp, w.A(), w.b(), w.wDiag(), wzrpy);
-      addLeastSquaresRows(qp, c.A(), c.b(), c.wDiag(), rowsXY());
+      static constexpr std::array<int,4> kRowsWaistZRPY{{2,3,4,5}};
+      addLeastSquaresRows(qp, w.A(), w.b(), w.wDiag(),
+                          kRowsWaistZRPY.data(), static_cast<int>(kRowsWaistZRPY.size()));
+      addLeastSquaresRows(qp, c.A(), c.b(), c.wDiag(), kRowsXY.data(), static_cast<int>(kRowsXY.size()));
     }
   }
 
@@ -736,9 +746,13 @@ bool IDProblem::buildQP(QPProblem& qp)
   if(activate_postural_) {
     const auto& t = *postural_;
     const int n = static_cast<int>(t.b().size());
-    const auto rows = rowsLimbs(n);
-    if(!rows.empty()) {
-      addLeastSquaresRows(qp, t.A(), t.b(), t.wDiag(), rows);
+    if(n > FLOATING_BASE_DOFS) {
+      for(int ri = FLOATING_BASE_DOFS; ri < n; ++ri) {
+        const double wi = t.wDiag()(ri) * t.wDiag()(ri);
+        if(wi <= 0.0) continue;
+        qp.H.noalias() += wi * (t.A().row(ri).transpose() * t.A().row(ri));
+        qp.g.noalias() += (-wi * t.b()(ri)) * t.A().row(ri).transpose();
+      }
     }
   }
 

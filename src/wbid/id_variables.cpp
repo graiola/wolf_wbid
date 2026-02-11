@@ -95,10 +95,15 @@ bool IDVariables::computeTorque(QuadrupedRobot& model,
   model.setJointAcceleration(qddot_out);
   model.update();
 
-  Eigen::VectorXd tau(model.getJointNum());
-  model.computeInverseDynamics(tau); // assumes no contact forces inside model ID
+  const int ndofs = model.getJointNum();
+  if(tau_out.size() != ndofs) {
+    tau_out.resize(ndofs);
+  }
+  model.computeInverseDynamics(tau_out); // assumes no contact forces inside model ID
 
-  Eigen::MatrixXd J(6, model.getJointNum());
+  if(J_tmp_.rows() != 6 || J_tmp_.cols() != ndofs) {
+    J_tmp_.resize(6, ndofs);
+  }
   contact_wrenches_out.resize(contacts_.size());
 
   for(size_t i=0;i<contacts_.size();++i){
@@ -106,11 +111,9 @@ bool IDVariables::computeTorque(QuadrupedRobot& model,
 
     contact_wrenches_out[i] = contactWrench6(x, link);
 
-    model.getJacobian(link, J); // 6 x n
-    tau.noalias() -= J.transpose() * contact_wrenches_out[i];
+    model.getJacobian(link, J_tmp_); // 6 x n
+    tau_out.noalias() -= J_tmp_.transpose() * contact_wrenches_out[i];
   }
-
-  tau_out = tau;
 
   if(model.isFloatingBase()){
     for(int i=0; i<6 && i<tau_out.size(); ++i){

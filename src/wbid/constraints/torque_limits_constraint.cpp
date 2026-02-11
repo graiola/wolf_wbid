@@ -115,9 +115,12 @@ void TorqueLimitsConstraint::update(const Eigen::VectorXd&)
   if(B_.rows() != ndofs || B_.cols() != ndofs || h_.size() != ndofs)
     throw std::runtime_error("TorqueLimitsConstraint: inconsistent robot dynamics sizes");
 
-  // vincolo su TUTTI i dof (inclusa floating base)
-  resizeLinear(ndofs, vars_.size());
-  A_.setZero();
+  // Constraint on all dofs (including floating base). Allocate once, then reuse.
+  if(A_.rows() != ndofs || A_.cols() != vars_.size()) {
+    resizeLinear(ndofs, vars_.size());
+  } else {
+    A_.setZero();
+  }
 
   // qddot block deve essere ndofs (18 nel tuo caso)
   const auto& qb = vars_.qddotBlock();

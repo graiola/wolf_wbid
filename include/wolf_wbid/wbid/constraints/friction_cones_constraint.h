@@ -17,10 +17,10 @@
 namespace wolf_wbid {
 
 /**
- * Aggregatore: impila N FrictionConeConstraint (5 righe ciascuna)
- * in un'unica constraint lineare (A, lA, uA) conforme a IConstraint.
+ * @brief Aggregates multiple FrictionConeConstraint objects into one linear constraint.
  *
- * Nota: non aggiunge bounds su variabili (l/u), solo vincoli lineari.
+ * Each cone contributes 5 rows. The class stacks all cones into a single
+ * `(A, lA, uA)` constraint. It does not contribute variable bounds `(l, u)`.
  */
 class FrictionConesConstraint final : public ConstraintBase
 {
@@ -33,11 +33,12 @@ public:
                           const std::vector<Eigen::Matrix3d>& wRl_list,
                           const std::vector<double>& mu_list);
 
-  void update(const Eigen::VectorXd& x) override; // di default no-op (o rebuild se vuoi)
+  /** @brief Updates constraint data. */
+  void update(const Eigen::VectorXd& x) override;
 
   FrictionConeConstraint::Ptr getFrictionCone(const std::string& contact_name);
 
-  // Re-impila A/lA/uA dai singoli coni
+  /** @brief Rebuilds stacked `(A, lA, uA)` from individual cones. */
   void rebuild();
 
 private:

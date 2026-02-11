@@ -500,15 +500,17 @@ void QuadrupedRobotRBDL::getCOMVelocity(Eigen::Vector3d& v_W) const
 void QuadrupedRobotRBDL::getCOMJacobian(Eigen::MatrixXd& Jcom) const
 {
   tmp_jacobian_.setZero(6, rbdl_model_.dof_count);
+  if(tmp_jacobian3_.rows() != 3 || tmp_jacobian3_.cols() != rbdl_model_.dof_count) {
+    tmp_jacobian3_.resize(3, rbdl_model_.dof_count);
+  }
   double mass = 0.0;
   int body_id = 0;
 
   for(body_id = 1; body_id < static_cast<int>(rbdl_model_.mBodies.size()); ++body_id) {
     const RigidBodyDynamics::Body& body = rbdl_model_.mBodies[body_id];
-    Eigen::MatrixXd Jtmp(3, rbdl_model_.dof_count);
-    Jtmp.setZero();
-    RigidBodyDynamics::CalcPointJacobian(rbdl_model_, q_, body_id, body.mCenterOfMass, Jtmp, false);
-    tmp_jacobian_.block(0,0,3,rbdl_model_.dof_count) += body.mMass * Jtmp;
+    tmp_jacobian3_.setZero();
+    RigidBodyDynamics::CalcPointJacobian(rbdl_model_, q_, body_id, body.mCenterOfMass, tmp_jacobian3_, false);
+    tmp_jacobian_.block(0,0,3,rbdl_model_.dof_count) += body.mMass * tmp_jacobian3_;
     mass += body.mMass;
   }
 
@@ -589,11 +591,10 @@ bool QuadrupedRobotRBDL::getVelocityTwist(const std::string& distal, const std::
     return getVelocityTwist(distal, twist);
   }
 
-  Eigen::MatrixXd J;
-  if(!const_cast<QuadrupedRobotRBDL*>(this)->getRelativeJacobian(q_, distal, base, J)) {
+  if(!const_cast<QuadrupedRobotRBDL*>(this)->getRelativeJacobian(q_, distal, base, tmp_jacobian_rel_)) {
     return false;
   }
-  twist.noalias() = J * qdot_;
+  twist.noalias() = tmp_jacobian_rel_ * qdot_;
   return true;
 }
 
@@ -611,8 +612,11 @@ bool QuadrupedRobotRBDL::computeJdotQdot(const std::string& link, const Eigen::V
     if(body_id < 0) return false;
     p = T_ancestor_to_link.translation();
   }
-  Eigen::VectorXd qdd_zero = Eigen::VectorXd::Zero(qdot_.size());
-  Eigen::Vector6d acc = RigidBodyDynamics::CalcPointAcceleration6D(rbdl_model_, q_, qdot_, qdd_zero, body_id, p, true);
+  if(tmp_qdd_zero_.size() != qdot_.size()) {
+    tmp_qdd_zero_.resize(qdot_.size());
+  }
+  tmp_qdd_zero_.setZero();
+  Eigen::Vector6d acc = RigidBodyDynamics::CalcPointAcceleration6D(rbdl_model_, q_, qdot_, tmp_qdd_zero_, body_id, p, true);
   jdotqdot.head<3>() = acc.tail<3>();
   jdotqdot.tail<3>() = acc.head<3>();
   return true;
@@ -815,9 +819,8 @@ bool QuadrupedRobotRBDL::getRelativeJacobian(const Eigen::VectorXd& q,
                                              const std::string& base_link_name,
                                              Eigen::MatrixXd& J)
 {
-  Eigen::MatrixXd J_base_w, J_target_w;
-  if(!getJacobian(q, base_link_name, J_base_w)) return false;
-  if(!getJacobian(q, target_link_name, J_target_w)) return false;
+  if(!getJacobian(q, base_link_name, tmp_jacobian_base_w_)) return false;
+  if(!getJacobian(q, target_link_name, tmp_jacobian_target_w_)) return false;
 
   Eigen::Affine3d w_T_base, w_T_target;
   if(!getPose(q, base_link_name, w_T_base)) return false;
@@ -826,15 +829,14 @@ bool QuadrupedRobotRBDL::getRelativeJacobian(const Eigen::VectorXd& q,
   const Eigen::Vector3d w_p_base   = w_T_base.translation();
   const Eigen::Vector3d w_p_target = w_T_target.translation();
 
-  Eigen::MatrixXd J_base_shift = J_base_w;
-  J_base_shift.topRows(3).noalias() += skew(w_p_target - w_p_base) * J_base_w.bottomRows(3);
-
-  Eigen::MatrixXd J_rel_w = J_target_w - J_base_shift;
+  tmp_jacobian_rel_ = tmp_jacobian_base_w_;
+  tmp_jacobian_rel_.topRows(3).noalias() += skew(w_p_target - w_p_base) * tmp_jacobian_base_w_.bottomRows(3);
+  tmp_jacobian_target_w_.noalias() -= tmp_jacobian_rel_;
 
   const Eigen::Matrix3d w_R_base = w_T_base.linear();
-  J.resize(6, J_rel_w.cols());
-  J.topRows(3) = w_R_base.transpose() * J_rel_w.topRows(3);
-  J.bottomRows(3) = w_R_base.transpose() * J_rel_w.bottomRows(3);
+  J.resize(6, tmp_jacobian_target_w_.cols());
+  J.topRows(3) = w_R_base.transpose() * tmp_jacobian_target_w_.topRows(3);
+  J.bottomRows(3) = w_R_base.transpose() * tmp_jacobian_target_w_.bottomRows(3);
   return true;
 }
 

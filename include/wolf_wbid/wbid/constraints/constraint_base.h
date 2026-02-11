@@ -11,9 +11,12 @@
 
 namespace wolf_wbid {
 
-// big-M used as "infinity" in bounds
+/** @brief Large finite value used as practical infinity for bounds. */
 inline constexpr double kInf = 1.0e20;
 
+/**
+ * @brief Interface for linear constraints of the form `lA <= A*x <= uA`.
+ */
 class IConstraint
 {
 public:
@@ -24,10 +27,10 @@ public:
   virtual bool enabled() const = 0;
   virtual void setEnabled(bool en) = 0;
 
-  // Update internal matrices/bounds (typically depends on robot state, sometimes on x)
+  // Updates internal matrices and bounds.
   virtual void update(const Eigen::VectorXd& x) = 0;
 
-  // Linear constraints: lA <= A x <= uA
+  // Linear constraint dimensions and data.
   virtual int rows() const = 0;
   virtual int cols() const = 0;
 
@@ -36,6 +39,9 @@ public:
   virtual const Eigen::VectorXd& uA() const = 0;
 };
 
+/**
+ * @brief Convenience base class for constraints with optional variable bounds.
+ */
 class ConstraintBase : public IConstraint
 {
 public:
@@ -55,7 +61,7 @@ public:
   const Eigen::VectorXd& lA() const override { return lA_; }
   const Eigen::VectorXd& uA() const override { return uA_; }
 
-  // optional variable bounds (size nvars). empty => no bounds contribution.
+  // Optional variable bounds (size nvars). Empty means no bound contribution.
   const Eigen::VectorXd& l() const { return l_; }
   const Eigen::VectorXd& u() const { return u_; }
   bool hasBounds() const { return (l_.size() > 0) && (u_.size() > 0); }

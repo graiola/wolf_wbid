@@ -31,8 +31,9 @@ namespace wolf_wbid {
 class IDVariables;
 
 /**
- * ROS wrapper for OpenSoT-free POINT_CONTACT wrench task
- * Minimizes || f_contact - f_ref || with scalar weight.
+ * @brief ROS wrapper for a point-contact wrench tracking task.
+ *
+ * Minimizes `||f_contact - f_ref||` with scalar weighting.
  */
 class WrenchImpl : public Wrench, public TaskRosHandler<wolf_msgs::WrenchTask>
 {
@@ -53,7 +54,7 @@ public:
   bool reset() override;
 
 protected:
-  // called by TaskWrapperInterface::update(x)
+  // Called by TaskWrapperInterface::update().
   void applyExternalKnobs() override;
   void applyExternalReference() override;
 
@@ -64,8 +65,7 @@ private:
 
   realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_force_;
 
-  // Optional: cache last x if you want to publish actual wrench from solution
-  // (set from updateCost or from solver externally)
+  // Optional cache of the last solution value used for publishing.
   Eigen::Vector3d last_f_act_{Eigen::Vector3d::Zero()};
   bool has_last_f_act_{false};
 };

@@ -112,9 +112,9 @@ QPSolution QPOasesSolver::solve(const QPProblem& qp)
     lA_ = qp.lA;
     uA_ = qp.uA;
   } else {
-    A_rm_.resize(0, n);
-    lA_.resize(0);
-    uA_.resize(0);
+    if(A_rm_.rows() != 0 || A_rm_.cols() != n) A_rm_.resize(0, n);
+    if(lA_.size() != 0) lA_.resize(0);
+    if(uA_.size() != 0) uA_.resize(0);
   }
 
   const double inf = qpOASES::INFTY;
@@ -129,8 +129,10 @@ QPSolution QPOasesSolver::solve(const QPProblem& qp)
     l_ = qp.l;
     u_ = qp.u;
   } else if(qp.l.size() == 0 && qp.u.size() == 0) {
-    l_ = Eigen::VectorXd::Constant(n, -inf);
-    u_ = Eigen::VectorXd::Constant(n,  inf);
+    if(l_.size() != n) l_.resize(n);
+    if(u_.size() != n) u_.resize(n);
+    l_.setConstant(-inf);
+    u_.setConstant( inf);
   } else {
     throw std::runtime_error("QPOasesSolver: bounds must be either both size n or both empty");
   }
@@ -169,7 +171,7 @@ QPSolution QPOasesSolver::solve(const QPProblem& qp)
 
   initialized_ = true;
 
-  x_.resize(n);
+  if(x_.size() != n) x_.resize(n);
   qpOASES::returnValue rv_sol = problem_->getPrimalSolution(x_.data());
   if(rv_sol != qpOASES::SUCCESSFUL_RETURN) {
     sol.success = false;

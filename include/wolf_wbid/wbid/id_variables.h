@@ -15,6 +15,13 @@ namespace wolf_wbid {
 
 class QuadrupedRobot;
 
+/**
+ * @brief Variable layout helper for the inverse-dynamics QP decision vector.
+ *
+ * Decision vector layout:
+ * - joint accelerations block `qddot`
+ * - one contact block per contact name (3D force or 6D wrench)
+ */
 class IDVariables
 {
 public:
@@ -43,7 +50,7 @@ public:
 
   int contactOffset(const std::string& name) const;
 
-  // Convention: wrench = [Fx,Fy,Fz,Mx,My,Mz] (in base/world as defined by your Jacobian)
+  // Convention: wrench = [Fx, Fy, Fz, Mx, My, Mz].
   Eigen::Vector3d contactForce3(const Eigen::VectorXd& x, const std::string& name) const;
   Eigen::Vector6d contactWrench6(const Eigen::VectorXd& x, const std::string& name) const;
 
@@ -65,6 +72,10 @@ private:
   Block qddot_block_;
   std::map<std::string, Block> blocks_;
   int size_{0};
+
+  // Reusable buffers for RT-safe torque computation.
+  mutable Eigen::VectorXd tau_tmp_;
+  mutable Eigen::MatrixXd J_tmp_;
 };
 
 } // namespace wolf_wbid

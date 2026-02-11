@@ -12,6 +12,9 @@
 
 namespace wolf_wbid {
 
+/**
+ * @brief qpOASES-based implementation of IQPSolver.
+ */
 class QPOasesSolver final : public IQPSolver
 {
 public:
@@ -30,7 +33,7 @@ private:
   void ensureProblemSize(int n, int m);
   void applyOptions();
 
-  // Matches OpenSoT convention (default multiplies qpOASES internal eps).
+  // Default absolute regularization value passed to qpOASES.
   static constexpr double BASE_REGULARISATION = 2.0e2;
 
   double eps_reg_{BASE_REGULARISATION};

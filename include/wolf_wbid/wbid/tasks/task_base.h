@@ -22,7 +22,7 @@ namespace wolf_wbid {
  * Residual: r(x) = A x - b
  * Weighting: 0.5 * r' W r, with W diagonal (row-weights).
  *
- * We keep both:
+ * The class stores:
  *  - w_diag_user_   : user-provided per-row weights (>=0)
  *  - weight_scalar_ : scalar multiplier (>=0)
  *  - w_diag_final_  : final per-row weights (= weight_scalar_ * w_diag_user_)
@@ -42,9 +42,9 @@ public:
   bool enabled() const { return enabled_; }
   void setEnabled(bool en) { enabled_ = en; }
 
-  // ----- lambda (legacy knobs; semantics task-specific) -----
+  // ----- lambda parameters (task-specific semantics) -----
   void setLambda(double l1, double l2 = 0.0);
-  double getLambda()  const { return lambda1_; } // legacy name
+  double getLambda()  const { return lambda1_; } // Backward-compatible alias.
   double getLambda1() const { return lambda1_; }
   double getLambda2() const { return lambda2_; }
 
@@ -57,11 +57,11 @@ public:
   void setWeightDiag(const Eigen::VectorXd& w_diag);
   void setWeightDiag(double w); // constant diag
 
-  // Backward-compatible aliases
+  // Backward-compatible aliases.
   void setWeight(const Eigen::VectorXd& w_diag) { setWeightDiag(w_diag); }
   void setWeight(const Eigen::MatrixXd& Wdiag);
 
-  // Legacy: return diagonal matrix (built from FINAL weights)
+  // Returns the diagonal matrix built from final row weights.
   Eigen::MatrixXd getWeight() const { return W_; }
   Eigen::MatrixXd WdiagMatrix() const { return W_; }
 
@@ -84,8 +84,10 @@ public:
   int rows() const { return static_cast<int>(b_.size()); }
   int cols() const { return static_cast<int>(A_.cols()); }
 
-  // Update term based on current x (task-specific)
-  virtual void update(const Eigen::VectorXd& x) = 0;
+  // Update term (task-specific)
+  virtual void update() = 0;
+  // Compatibility overload for existing call sites.
+  void update(const Eigen::VectorXd& /*x*/) { update(); }
 
   // Optional: reset internal caches (references, integrators, etc.)
   virtual bool reset() { return true; }

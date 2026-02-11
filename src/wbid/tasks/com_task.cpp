@@ -20,6 +20,9 @@ ComTask::ComTask(const std::string& task_id,
   // default gains
   TaskBase::setKp(Eigen::Matrix3d::Identity());
   TaskBase::setKd(Eigen::Matrix3d::Identity());
+
+  // Preallocate runtime Jacobian buffer.
+  Jcom_.setZero(3, qb_.dim);
 }
 
 void ComTask::setReference(const Eigen::Vector3d& p_ref, const Eigen::Vector3d& v_ref)
@@ -39,7 +42,7 @@ void ComTask::getCOMVelocity(Eigen::Vector3d& v_W) const
 }
 void ComTask::getCOMJacobian(Eigen::MatrixXd& Jcom) const
 {
-  Jcom.resize(3, robot_.getJointNum());
+  // caller keeps Jcom preallocated
   robot_.getCOMJacobian(Jcom);
 }
 void ComTask::getCOMJacobianDotTimesQdot(Eigen::Vector3d& Jdot_qdot) const
@@ -49,21 +52,20 @@ void ComTask::getCOMJacobianDotTimesQdot(Eigen::Vector3d& Jdot_qdot) const
 }
 // ---------------------------------------------------
 
-void ComTask::update(const Eigen::VectorXd& /*x*/)
+void ComTask::update()
 {
   if(!enabled()) {
     b_.setZero();
     return;
   }
 
-  Eigen::MatrixXd Jcom;
-  getCOMJacobian(Jcom);
+  getCOMJacobian(Jcom_);
 
-  if(Jcom.cols() != qb_.dim)
+  if(Jcom_.cols() != qb_.dim)
     throw std::runtime_error("ComTask::update(): Jcom cols != qddot dim");
 
   A_.setZero();
-  A_.block(0, qb_.offset, 3, qb_.dim) = Jcom;
+  A_.block(0, qb_.offset, 3, qb_.dim) = Jcom_;
 
   // actual
   getCOM(p_act_);

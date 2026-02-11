@@ -53,7 +53,7 @@ void WrenchTask::setReference(const Eigen::Vector3d& f_ref)
   b_ = f_ref_;
 }
 
-void WrenchTask::update(const Eigen::VectorXd& /*x*/)
+void WrenchTask::update()
 {
   // A is a scaled selector, b is the scaled reference.
   // (No need to read x here; IDProblem uses A,b,wDiag to build H,g.)

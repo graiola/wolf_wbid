@@ -15,14 +15,15 @@
 namespace wolf_wbid {
 
 /**
- * Point-contact friction pyramid (5 inequalities):
+ * @brief Point-contact friction pyramid constraint (5 inequalities).
+ *
  *  Fx - mu/sqrt(2)*Fz <= 0
  * -Fx - mu/sqrt(2)*Fz <= 0
  *  Fy - mu/sqrt(2)*Fz <= 0
  * -Fy - mu/sqrt(2)*Fz <= 0
  *           -Fz <= 0   (i.e., Fz >= 0)
  *
- * Then rotated by wRl (same OpenSoT behavior): Ci = Ci * wRl^T
+ * The pyramid is rotated by `wRl`: `Ci = Ci * wRl^T`.
  */
 class FrictionConeConstraint final : public ConstraintBase
 {

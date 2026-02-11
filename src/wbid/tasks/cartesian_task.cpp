@@ -34,6 +34,11 @@ CartesianTask::CartesianTask(const std::string& task_id,
   // default reference: current (on reset)
   pose_ref_.setIdentity();
   twist_ref_.setZero();
+
+  // Preallocate runtime buffers for the hot path.
+  J6_.setZero(6, qb_.dim);
+  Bi_.setZero(qb_.dim, qb_.dim);
+  tmp6xn_.setZero(6, qb_.dim);
 }
 
 bool CartesianTask::setBaseLink(const std::string& new_base_link)
@@ -86,8 +91,7 @@ Eigen::Matrix<double,6,1> CartesianTask::se3LogApprox(const Eigen::Affine3d& T_e
 // ---- QuadrupedRobot API adapters (adjust if needed) ----
 void CartesianTask::getJacobian6(const std::string& link, Eigen::MatrixXd& J6) const
 {
-  // expected: 6 x nj
-  J6.resize(6, robot_.getJointNum());
+  // expected: 6 x nj (caller keeps J6 preallocated)
   robot_.getJacobian(link, J6);
 }
 
@@ -120,7 +124,7 @@ void CartesianTask::getLinkPoseInWorld(const std::string& link, Eigen::Affine3d&
 
 // --------------------------------------------------------
 
-void CartesianTask::update(const Eigen::VectorXd& /*x*/)
+void CartesianTask::update()
 {
   if(!enabled())
   {
@@ -132,7 +136,7 @@ void CartesianTask::update(const Eigen::VectorXd& /*x*/)
 
   // --- Read current pose / Jacobian / twist / Jdot*qdot using the same APIs as the old code
   Eigen::Affine3d pose_current = Eigen::Affine3d::Identity();
-  Eigen::MatrixXd J6;                 // 6 x nj
+  Eigen::MatrixXd& J6 = J6_;          // 6 x nj (preallocated)
   Eigen::Matrix<double,6,1> vel_current; vel_current.setZero();
   Eigen::Matrix<double,6,1> jdotqdot;     jdotqdot.setZero();
 
@@ -223,14 +227,13 @@ void CartesianTask::update(const Eigen::VectorXd& /*x*/)
   else
   {
     // Force mode: y = acc_ref + Mi*(lambda2*Kd*e_v + lambda1*Kp*e_x + f_virtual)
-    Eigen::MatrixXd Bi;
-    robot_.getInertiaInverse(Bi);
+    robot_.getInertiaInverse(Bi_);
 
-    if(Bi.rows() != qb_.dim || Bi.cols() != qb_.dim)
+    if(Bi_.rows() != qb_.dim || Bi_.cols() != qb_.dim)
       throw std::runtime_error("CartesianTask::update(): inertia inverse size mismatch");
 
-    Eigen::MatrixXd tmp6xn = J6 * Bi;                 // 6 x n
-    Eigen::Matrix<double,6,6> Mi = tmp6xn * J6.transpose();
+    tmp6xn_.noalias() = J6 * Bi_;                     // 6 x n
+    Eigen::Matrix<double,6,6> Mi = tmp6xn_ * J6.transpose();
 
     y = acc_ref
         + getLambda2() * (Mi * (getKd() * vel_error))

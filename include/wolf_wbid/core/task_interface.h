@@ -28,7 +28,7 @@ class QuadrupedRobot;
 class IDVariables;
 }
 
-// New OpenSoT-free tasks
+// Task implementations
 #include <wolf_wbid/wbid/tasks/cartesian_task.h>
 #include <wolf_wbid/wbid/tasks/com_task.h>
 #include <wolf_wbid/wbid/tasks/angular_momentum_task.h>
@@ -41,9 +41,9 @@ namespace wolf_wbid {
  * Base interface for ROS wrappers (ROS1/ROS2).
  * IMPORTANT: do NOT include ROS headers here.
  *
- * This class defines the *single* stable entrypoint the solver will call: update(x).
+ * This class defines the single entry point called by the solver: `update()`.
  * It uses the Template Method pattern:
- *   update(x) = applyExternalKnobs() + applyExternalReference() + doUpdate(x)
+ *   `update() = applyExternalKnobs() + applyExternalReference() + doUpdate()`
  */
 class TaskWrapperInterface
 {
@@ -57,22 +57,27 @@ public:
     std::atomic<bool> set_ext_reference = false;
   } OPTIONS;
 
-  TaskWrapperInterface(const std::string& task_name, // TODO Remove task name, use task id
+  TaskWrapperInterface(const std::string& task_name,
                        const std::string& robot_name,
                        const double& period);
 
   virtual ~TaskWrapperInterface() = default;
 
-  // Solver entrypoint (single, deterministic)
-  void update(const Eigen::VectorXd& x);
+  /** @brief Solver entry point (single, deterministic). */
+  void update();
+  // Compatibility overload for existing call sites.
+  void update(const Eigen::VectorXd& /*x*/) { update(); }
 
-  // Wrapper API (no ROS headers here)
+  /** @brief Publishes runtime task state. */
   virtual void publish() = 0;
+  /** @brief Loads task parameters from the configured source. */
   virtual void loadParams() = 0;
+  /** @brief Registers dynamic parameters, if any. */
   virtual void registerReconfigurableVariables() {}
+  /** @brief Updates task cost diagnostics from the current solution. */
   virtual void updateCost(const Eigen::VectorXd& x) = 0;
 
-  // DDR callbacks (keep legacy API) -> they only write buffers
+  // Dynamic parameter callbacks. They only write thread-safe buffers.
   void setLambda1(double value);
   void setLambda2(double value);
   void setWeightDiag(double value);
@@ -92,13 +97,13 @@ public:
   void setKdYaw(double value);
 
 protected:
-  // Hooks called by update(x)
+  // Hooks called by update()
   // Default: no-op. Concrete wrappers (ROS handlers) override what they need.
   virtual void applyExternalKnobs() {}
   virtual void applyExternalReference() {}
 
   // Task-core update (A,b,errors,...). Must be implemented by the stable handle classes.
-  virtual void doUpdate(const Eigen::VectorXd& x) = 0;
+  virtual void doUpdate() = 0;
 
 protected:
   double      period_{0.001};
@@ -138,17 +143,13 @@ protected:
   double cost_{0.0};
 };
 
-// --------------------
-// Stable task handles used by IDProblem
-// Each handle:
-//  - exposes a single update(x) (hides the task-base update to avoid ambiguity)
-//  - implements doUpdate(x) by calling the task-core update
-//  - can implement common applyExternalKnobs() if desired (later)
-// --------------------
+// Stable task handles used by IDProblem.
+// Each handle exposes one update() entry point and forwards the core task update.
 
 // --------------------
 // CARTESIAN
 // --------------------
+/** @brief Stable Cartesian task handle used by IDProblem. */
 class Cartesian : public CartesianTask, public TaskWrapperInterface
 {
 public:
@@ -166,18 +167,20 @@ public:
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
-  // IMPORTANT: expose a single update(x) to the solver
-  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+  // Expose a single update() entry point to the solver.
+  void update() { TaskWrapperInterface::update(); }
+  void update(const Eigen::VectorXd& /*x*/) { TaskWrapperInterface::update(); }
 
   virtual bool reset() = 0;
 
 protected:
-  void doUpdate(const Eigen::VectorXd& x) final { CartesianTask::update(x); }
+  void doUpdate() final { CartesianTask::update(); }
 };
 
 // --------------------
 // COM
 // --------------------
+/** @brief Stable center-of-mass task handle used by IDProblem. */
 class Com : public ComTask, public TaskWrapperInterface
 {
 public:
@@ -192,17 +195,19 @@ public:
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
-  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+  void update() { TaskWrapperInterface::update(); }
+  void update(const Eigen::VectorXd& /*x*/) { TaskWrapperInterface::update(); }
 
   virtual bool reset() = 0;
 
 protected:
-  void doUpdate(const Eigen::VectorXd& x) final { ComTask::update(x); }
+  void doUpdate() final { ComTask::update(); }
 };
 
 // --------------------
 // WRENCH (point contact force R^3)
 // --------------------
+/** @brief Stable point-contact wrench task handle used by IDProblem. */
 class Wrench : public WrenchTask, public TaskWrapperInterface
 {
 public:
@@ -218,14 +223,16 @@ public:
   , TaskWrapperInterface(task_id, robot_name, period)
   {}
 
-  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+  void update() { TaskWrapperInterface::update(); }
+  void update(const Eigen::VectorXd& /*x*/) { TaskWrapperInterface::update(); }
 
   virtual bool reset() = 0;
 
 protected:
-  void doUpdate(const Eigen::VectorXd& x) final { WrenchTask::update(x); }
+  void doUpdate() final { WrenchTask::update(); }
 };
 
+/** @brief Stable angular-momentum task handle used by IDProblem. */
 class AngularMomentum : public AngularMomentumTask, public TaskWrapperInterface
 {
 public:
@@ -247,14 +254,16 @@ public:
   : AngularMomentum(robot_name, "angular_momentum", robot, vars, period)
   {}
 
-  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+  void update() { TaskWrapperInterface::update(); }
+  void update(const Eigen::VectorXd& /*x*/) { TaskWrapperInterface::update(); }
 
   virtual bool reset() = 0;
 
 protected:
-  void doUpdate(const Eigen::VectorXd& x) final { AngularMomentumTask::update(x); }
+  void doUpdate() final { AngularMomentumTask::update(); }
 };
 
+/** @brief Stable postural task handle used by IDProblem. */
 class Postural : public PosturalTask, public TaskWrapperInterface
 {
 public:
@@ -276,12 +285,13 @@ public:
   : Postural(robot_name, "postural", robot, vars, period)
   {}
 
-  void update(const Eigen::VectorXd& x) { TaskWrapperInterface::update(x); }
+  void update() { TaskWrapperInterface::update(); }
+  void update(const Eigen::VectorXd& /*x*/) { TaskWrapperInterface::update(); }
 
   virtual bool reset() = 0;
 
 protected:
-  void doUpdate(const Eigen::VectorXd& x) final { PosturalTask::update(x); }
+  void doUpdate() final { PosturalTask::update(); }
 };
 
 } // namespace wolf_wbid

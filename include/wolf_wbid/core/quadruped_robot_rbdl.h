@@ -4,8 +4,8 @@
  */
 
 /**
-WoLF: WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
-**/
+ * @brief RBDL-backed implementation of QuadrupedRobot.
+ */
 
 #ifndef WOLF_WBID_QUADRUPED_ROBOT_RBDL_H
 #define WOLF_WBID_QUADRUPED_ROBOT_RBDL_H
@@ -24,6 +24,9 @@ WoLF: WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro 
 namespace wolf_wbid
 {
 
+/**
+ * @brief Concrete quadruped robot model implemented with RBDL.
+ */
 class QuadrupedRobotRBDL : public QuadrupedRobot
 {
 public:
@@ -261,6 +264,11 @@ private:
   mutable Eigen::Affine3d tmp_affine3d_1_;
   mutable Eigen::Vector6d tmp_vector6d_;
   mutable Eigen::Vector6d tmp_vector6d_1_;
+  mutable Eigen::VectorXd tmp_qdd_zero_;
+  mutable Eigen::MatrixXd tmp_jacobian3_;
+  mutable Eigen::MatrixXd tmp_jacobian_base_w_;
+  mutable Eigen::MatrixXd tmp_jacobian_target_w_;
+  mutable Eigen::MatrixXd tmp_jacobian_rel_;
 };
 
 } // namespace wolf_wbid

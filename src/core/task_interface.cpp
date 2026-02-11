@@ -12,12 +12,12 @@ TaskWrapperInterface::TaskWrapperInterface(const std::string& task_name,
   // nothing else
 }
 
-void TaskWrapperInterface::update(const Eigen::VectorXd& x)
+void TaskWrapperInterface::update()
 {
   // Deterministic order
   applyExternalKnobs();
   applyExternalReference();
-  doUpdate(x);
+  doUpdate();
 
   // note: publish/updateCost are intentionally NOT called here
   // The solver can call them explicitly when desired.

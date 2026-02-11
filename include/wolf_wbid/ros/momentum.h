@@ -10,7 +10,7 @@ WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 #ifndef TASK_ROS_WRAPPERS_MOMENTUM_H
 #define TASK_ROS_WRAPPERS_MOMENTUM_H
 
-// ROS msg (legacy: reusing CartesianTask msg)
+// ROS message type currently reused from CartesianTask.
 #include <wolf_msgs/CartesianTask.h>
 
 // WoLF
@@ -26,6 +26,9 @@ namespace wolf_wbid {
 class QuadrupedRobot;
 class IDVariables;
 
+/**
+ * @brief ROS wrapper for the angular momentum task.
+ */
 class AngularMomentumImpl : public AngularMomentum, public TaskRosHandler<wolf_msgs::CartesianTask>
 {
 public:
@@ -45,9 +48,9 @@ public:
   bool reset() override;
 
 protected:
-  // called by TaskWrapperInterface::update(x)
+  // Called by TaskWrapperInterface::update().
   void applyExternalKnobs() override;
-  void applyExternalReference() override;  // typically unused for momentum
+  void applyExternalReference() override;  // Usually unused for momentum.
 
 };
 

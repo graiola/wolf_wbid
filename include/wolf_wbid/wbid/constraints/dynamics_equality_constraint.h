@@ -16,12 +16,12 @@
 namespace wolf_wbid {
 
 /**
- * Floating-base dynamics equality (6 rows):
+ * @brief Floating-base dynamics equality constraint (6 rows).
+ *
  *   Bu(q) * qddot + hu(q,qd) - sum_i Jf_i(q)^T * f_i = 0
  *
- * POINT_CONTACT only: f_i = [Fx,Fy,Fz].
- *
- * This matches OpenSoT DynamicFeasibility implementation which uses:
+ * Point-contact model only: `f_i = [Fx, Fy, Fz]`.
+ * The implementation uses:
  *   Bu = B.topRows(6)
  *   hu = h.topRows(6)
  *   Jf = Jtmp.block<6,6>(0,0).transpose()
@@ -57,9 +57,7 @@ private:
   Eigen::MatrixXd Jtmp_;  // 6 x n (robot dofs)
   Eigen::Matrix<double,6,6> Jf_; // 6 x 6 (base part transposed)
 
-  // selection that picks the base columns from qddot (assume floating base first 6)
-  // We'll build A directly, no need a separate selector.
+  // The base columns are assumed in the first 6 entries of qddot.
 };
 
 } // namespace wolf_wbid
-

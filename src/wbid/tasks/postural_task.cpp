@@ -32,6 +32,10 @@ PosturalTask::PosturalTask(const std::string& task_id,
   qd_ref_.setZero(n_);
   e_q_.setZero(n_);
   e_qd_.setZero(n_);
+  qdd_ref_.setZero(n_);
+  pd_term_.setZero(n_);
+  qdd_des_.setZero(n_);
+  Mi_.setZero(n_, n_);
 
   // default gains
   TaskBase::setKp(Eigen::MatrixXd::Identity(n_, n_));
@@ -75,12 +79,10 @@ void PosturalTask::setGains(const Eigen::MatrixXd& Kp, const Eigen::MatrixXd& Kd
 // ---- QuadrupedRobot adapters (adjust if needed) ----
 void PosturalTask::getJointPosition(Eigen::VectorXd& q) const
 {
-  q.resize(robot_.getJointNum());
   robot_.getJointPosition(q);
 }
 void PosturalTask::getJointVelocity(Eigen::VectorXd& qd) const
 {
-  qd.resize(robot_.getJointNum());
   robot_.getJointVelocity(qd);
 }
 std::vector<std::string> PosturalTask::getJointNames() const
@@ -89,7 +91,7 @@ std::vector<std::string> PosturalTask::getJointNames() const
 }
 // ---------------------------------------------------
 
-void PosturalTask::update(const Eigen::VectorXd& /*x*/)
+void PosturalTask::update()
 {
   if(!enabled()) {
     b_.setZero();
@@ -113,31 +115,28 @@ void PosturalTask::update(const Eigen::VectorXd& /*x*/)
 
   // One-shot acceleration feedforward was present in the old stack; if you don't expose it
   // in the new API, keep it as zero here.
-  const Eigen::VectorXd qdd_ref = Eigen::VectorXd::Zero(n_);
+  qdd_ref_.setZero();
 
   // PD term (in joint space)
-  const Eigen::VectorXd pd_term =
-      getKd() * e_qd_ + getKp() * e_q_;
+  pd_term_.noalias() = getKd() * e_qd_ + getKp() * e_q_;
 
-  Eigen::VectorXd qdd_des(n_);
   if(getGainType() == GainType::Acceleration)
   {
     // Acceleration-mode gains: directly shape desired joint acceleration.
-    qdd_des = qdd_ref + pd_term;
+    qdd_des_.noalias() = qdd_ref_ + pd_term_;
   }
   else
   {
     // Force-mode gains: map the PD term through inverse inertia (as in the old implementation).
-    Eigen::MatrixXd Mi;
-    robot_.getInertiaInverse(Mi);
-    if(Mi.rows() != n_ || Mi.cols() != n_)
+    robot_.getInertiaInverse(Mi_);
+    if(Mi_.rows() != n_ || Mi_.cols() != n_)
       throw std::runtime_error("PosturalTask::update(): inertia inverse size mismatch");
 
-    qdd_des = qdd_ref + Mi * pd_term;
+    qdd_des_.noalias() = qdd_ref_ + Mi_ * pd_term_;
   }
 
   // Task: qddot ~= qdd_des  ->  A x = b with A selecting qddot block
-  b_ = qdd_des;
+  b_ = qdd_des_;
 
   // OpenSoT-like: if you want "one-shot" velocity reference, reset it here.
   // (Keep/remove depending on how your wrapper uses qd_ref_.)

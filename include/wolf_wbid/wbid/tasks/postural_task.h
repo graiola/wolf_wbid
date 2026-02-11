@@ -19,7 +19,7 @@ namespace wolf_wbid {
 class QuadrupedRobot;
 
 /**
- * @brief Joint-space postural acceleration tracking task:
+ * @brief Joint-space postural acceleration tracking task.
  *
  * qdd_des = Kp*(q_ref - q) + Kd*(qd_ref - qd)
  *
@@ -27,7 +27,7 @@ class QuadrupedRobot;
  *   A = [I, 0]   over qddot block
  *   b = qdd_des
  *
- * This matches your wrappers that publish:
+ * Wrappers publish:
  *  actualQ, actualQdot, refQ, refQdotCached, errors
  *
  * weight handled as row weights (size = njoints).
@@ -39,7 +39,7 @@ public:
                QuadrupedRobot& robot,
                const IDVariables& vars);
 
-  // legacy-style knobs used in your wrappers
+  // Wrapper-facing convenience accessors.
   double getLambda1() const { return TaskBase::getLambda1(); }
   double getLambda2() const { return TaskBase::getLambda2(); }
 
@@ -69,7 +69,7 @@ public:
   // optional helper used by your wrapper (computeCost(x))
   double computeCost(const Eigen::VectorXd& x) const;
 
-  void update(const Eigen::VectorXd& x) override;
+  void update() override;
   bool reset() override;
 
 protected:
@@ -96,6 +96,12 @@ private:
 
   Eigen::VectorXd e_q_;
   Eigen::VectorXd e_qd_;
+
+  // preallocated runtime buffers (RT-safe update path)
+  Eigen::VectorXd qdd_ref_;
+  Eigen::VectorXd pd_term_;
+  Eigen::VectorXd qdd_des_;
+  Eigen::MatrixXd Mi_;
 };
 
 } // namespace wolf_wbid

@@ -18,20 +18,20 @@ namespace wolf_wbid {
 class QuadrupedRobot;
 
 /**
- * @brief Centroidal angular momentum rate task (3D), OpenSoT-like.
+ * @brief Centroidal angular momentum rate tracking task (3D).
  *
- * Model used (same as legacy):
+ * Model:
  *   h = [p; L]
  *   Ldot = (CMM_bottom) * qddot + (CMMdot*qdot)_bottom
  *
- * Tracking law (legacy):
+ * Tracking law:
  *   Ldot_ref = Ldot_d + lambda * K * (L_d - L)
  *
  * LSQ term:
  *   A = CMM_bottom placed on qddot block
  *   b = Ldot_ref - (CMMdot*qdot)_bottom
  *
- * OpenSoT behavior preserved:
+ * Update behavior:
  *  - first update() initializes L_d to current L
  *  - reference is cached for publishing
  *  - one-shot reset of L_d and Ldot_d after building the task
@@ -43,10 +43,10 @@ public:
                       QuadrupedRobot& robot,
                       const IDVariables& vars);
 
-  // Legacy lambda API: store it in TaskBase::lambda1_
+  // Lambda helper stored in TaskBase::lambda1_.
   void setLambda(double lambda) { TaskBase::setLambda(lambda, 0.0); }
 
-  // Reference interface (legacy)
+  // Reference interface.
   void setReference(const Eigen::Vector3d& desiredAngularMomentum);
   void setReference(const Eigen::Vector3d& desiredAngularMomentum,
                     const Eigen::Vector3d& desiredAngularMomentumVariation);
@@ -64,7 +64,7 @@ public:
   const Eigen::Vector3d& getCachedDesiredAngularMomentum() const { return L_d_cached_; }
   const Eigen::Vector3d& getCachedDesiredAngularMomentumRate() const { return Ldot_d_cached_; }
 
-  void update(const Eigen::VectorXd& x) override;
+  void update() override;
   bool reset() override;
 
 private:
@@ -72,7 +72,7 @@ private:
   const IDVariables& vars_;
   IDVariables::Block qb_;
 
-  // Model buffers (legacy names)
+  // Model buffers.
   Eigen::MatrixXd Mom_;          // 6 x nj
   Eigen::Vector6d CMMdotQdot_;   // 6
   Eigen::Vector6d h_;            // 6
@@ -80,7 +80,7 @@ private:
   Eigen::Vector3d L_ang_{Eigen::Vector3d::Zero()};
   Eigen::Vector3d Ldot_bias_{Eigen::Vector3d::Zero()};
 
-  // References (legacy behavior)
+  // References and cached values.
   Eigen::Vector3d L_d_{Eigen::Vector3d::Zero()};
   Eigen::Vector3d Ldot_d_{Eigen::Vector3d::Zero()};
   Eigen::Vector3d L_d_cached_{Eigen::Vector3d::Zero()};
