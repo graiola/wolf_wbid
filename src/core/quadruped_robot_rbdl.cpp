@@ -165,7 +165,12 @@ QuadrupedRobotRBDL::QuadrupedRobotRBDL(const std::string& robot_name,
   // Build limb joint indices
   for(const auto& lname : leg_names_) {
     for(const auto& jn : joint_leg_names_[lname]) {
-      int idx = joint_idx_.at(jn);
+      auto it = joint_idx_.find(jn);
+      if(it == joint_idx_.end()) {
+        throw std::runtime_error("QuadrupedRobotRBDL: leg joint '" + jn + "' from SRDF group '" + lname +
+                                 "' not found in URDF/RBDL model");
+      }
+      int idx = it->second;
       joint_limb_idx_[lname].push_back(idx);
       joint_leg_idx_.push_back(idx);
     }
@@ -174,7 +179,12 @@ QuadrupedRobotRBDL::QuadrupedRobotRBDL(const std::string& robot_name,
 
   for(const auto& aname : arm_names_) {
     for(const auto& jn : joint_arm_names_[aname]) {
-      int idx = joint_idx_.at(jn);
+      auto it = joint_idx_.find(jn);
+      if(it == joint_idx_.end()) {
+        throw std::runtime_error("QuadrupedRobotRBDL: arm joint '" + jn + "' from SRDF group '" + aname +
+                                 "' not found in URDF/RBDL model");
+      }
+      int idx = it->second;
       joint_limb_idx_[aname].push_back(idx);
       joint_arm_idx_.push_back(idx);
     }
