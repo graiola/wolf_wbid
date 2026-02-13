@@ -33,6 +33,9 @@
 
 namespace wolf_wbid {
 
+class QuadrupedRobot;
+class IDVariables;
+
 // CARTESIAN
 class CartesianImpl : public Cartesian, public TaskRosHandler<wolf_msgs::msg::CartesianTask>
 {
@@ -46,7 +49,7 @@ public:
             QuadrupedRobot& robot,
             const std::string& distal_link,
             const std::string& base_link,
-            const OpenSoT::AffineHelper& qddot,
+            const IDVariables& vars,
             const double& period = 0.001,
             const bool& use_mesh = true);
 
@@ -62,6 +65,8 @@ public:
 
 
 protected:
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;
 
   void makeMarker(const std::string &distal_link, const std::string &base_link, unsigned int interaction_mode, bool show);
 
@@ -103,8 +108,6 @@ protected:
   void setContinuousCtrl(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr &feedback);
 
 private:
-
-  virtual void _update(const Eigen::VectorXd& x) override;
 
   /**
    * @brief waypoints_pub_ ROS2 publisher for the waypoint poses

@@ -18,6 +18,8 @@
 
 namespace wolf_wbid {
 
+class IDVariables;
+
 // Wrench
 class WrenchImpl : public Wrench, public TaskRosHandler<wolf_msgs::msg::WrenchTask>
 {
@@ -28,9 +30,8 @@ public:
 
   WrenchImpl(const std::string& robot_name,
              const std::string& task_id,
-             const std::string& distal_link,
-             const std::string& base_link,
-             OpenSoT::AffineHelper& wrench,
+             const std::string& contact_name,
+             const IDVariables& vars,
              const double& period = 0.001);
 
   virtual void registerReconfigurableVariables() override;
@@ -43,13 +44,18 @@ public:
 
   virtual bool reset() override;
 
-private:
+protected:
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;
 
-  virtual void _update(const Eigen::VectorXd& x) override;
+private:
 
   void referenceCallback(const wolf_msgs::msg::Wrench::SharedPtr msg);
 
-  realtime_tools::RealtimeBuffer<Eigen::Vector6d> buffer_reference_;
+  const IDVariables& vars_;
+  realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_force_;
+  Eigen::Vector3d last_f_act_{Eigen::Vector3d::Zero()};
+  bool has_last_f_act_{false};
 
   typename rclcpp::Subscription<wolf_msgs::msg::Wrench>::SharedPtr reference_sub_;
 

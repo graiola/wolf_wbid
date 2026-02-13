@@ -14,6 +14,9 @@
 
 namespace wolf_wbid {
 
+class QuadrupedRobot;
+class IDVariables;
+
 // POSTURAL
 class PosturalImpl : public Postural, public TaskRosHandler<wolf_msgs::msg::PosturalTask>
 {
@@ -23,9 +26,9 @@ public:
   typedef std::shared_ptr<PosturalImpl> Ptr;
 
   PosturalImpl(const std::string& robot_name,
+               const std::string& task_id,
                QuadrupedRobot& robot,
-               OpenSoT::AffineHelper qddot = OpenSoT::AffineHelper(),
-               const std::string& task_id = "postural",
+               const IDVariables& vars,
                const double& period = 0.001);
 
   virtual void registerReconfigurableVariables() override;
@@ -38,9 +41,9 @@ public:
 
   virtual bool reset() override;
 
-private:
-
-  virtual void _update(const Eigen::VectorXd& x) override;
+protected:
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;
 
 };
 

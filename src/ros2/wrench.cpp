@@ -1,139 +1,152 @@
-/**
- * @file wrench.cpp
- * @author Gennaro Raiola
- * @date 25 April, 2023
- * @brief This file contains the wrench task wrapper for ROS
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Gennaro Raiola
  */
 
-// WoLF
 #include <wolf_wbid/ros2/wrench.h>
 #include <wolf_controller_utils/ros2_param_getter.h>
 
-using namespace wolf_controller_utils;
-using namespace wolf_wbid;
+#include <stdexcept>
+
+namespace wolf_wbid {
 
 WrenchImpl::WrenchImpl(const std::string& robot_name,
                        const std::string& task_id,
-                       const std::string& distal_link,
-                       const std::string& base_link,
-                       OpenSoT::AffineHelper& wrench,
+                       const std::string& contact_name,
+                       const IDVariables& vars,
                        const double& period)
-  :Wrench(robot_name,task_id,distal_link,base_link,wrench,period)
-  ,TaskRosHandler<wolf_msgs::msg::WrenchTask>(task_id,robot_name,period)
+  : Wrench(robot_name, task_id, contact_name, vars, period, 1.0)
+  , TaskRosHandler<wolf_msgs::msg::WrenchTask>(task_id, robot_name, period)
+  , vars_(vars)
 {
-  tmp_vectorXd_.resize(6); // Wrench
-  tmp_vectorXd_.setZero();
+  buffer_reference_force_.initRT(Eigen::Vector3d::Zero());
 
-  // Initialize buffers
-  buffer_reference_.initRT(tmp_vectorXd_);
-
-  // Create the reference subscriber
   reference_sub_ = task_nh_->create_subscription<wolf_msgs::msg::Wrench>(
-      "reference/" + _task_id, 1000,
-      std::bind(&WrenchImpl::referenceCallback, this, std::placeholders::_1)
-  );
+      "reference/" + task_id,
+      1000,
+      std::bind(&WrenchImpl::referenceCallback, this, std::placeholders::_1));
+
+  buffer_lambda1_ = this->getLambda1();
+  buffer_weight_diag_ = this->weight();
 }
 
 void WrenchImpl::registerReconfigurableVariables()
 {
-  double lambda1 = getLambda();
-  double weight  = getWeight()(0,0);
-
-  TaskWrapperInterface::setLambda1(lambda1);
-  TaskWrapperInterface::setWeightDiag(weight);
+  TaskWrapperInterface::setLambda1(this->getLambda1());
+  TaskWrapperInterface::setWeightDiag(this->weight());
 }
 
 void WrenchImpl::loadParams()
 {
-  double lambda1 = getLambda();
-  double weight  = getWeight()(0, 0);
+  double lambda1 = this->getLambda1();
+  double weight = this->weight();
 
-  lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda1", lambda1);
-  weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".weight",  weight);
+  lambda1 = wolf_controller_utils::get_double_parameter_from_remote_node(
+      "wolf_controller/gains." + task_name_ + ".lambda1", lambda1);
+  weight = wolf_controller_utils::get_double_parameter_from_remote_node(
+      "wolf_controller/gains." + task_name_ + ".weight", weight);
 
-  // Check if the values are positive
-  if(lambda1 < 0 || weight < 0)
-    throw std::runtime_error("Lambda and weight must be positive!");
+  if(lambda1 < 0.0 || weight < 0.0)
+    throw std::runtime_error("WrenchImpl::loadParams(): lambda/weight must be >= 0");
 
   buffer_lambda1_ = lambda1;
   buffer_weight_diag_ = weight;
 
-  setLambda(lambda1);
-  setWeight(weight);
+  this->setLambda(lambda1, 0.0);
+  this->setWeight(weight);
+}
+
+void WrenchImpl::applyExternalKnobs()
+{
+  if(OPTIONS.set_ext_lambda)
+    this->setLambda(buffer_lambda1_.load(), 0.0);
+
+  if(OPTIONS.set_ext_weight)
+    this->setWeight(buffer_weight_diag_.load());
+}
+
+void WrenchImpl::applyExternalReference()
+{
+  if(OPTIONS.set_ext_reference)
+    this->setReference(*buffer_reference_force_.readFromRT());
 }
 
 void WrenchImpl::updateCost(const Eigen::VectorXd& x)
 {
-  cost_ = computeCost(x);
+  const int off = vars_.contactOffset(contactName());
+  if(off < 0 || off + 3 > x.size())
+    throw std::runtime_error("WrenchImpl::updateCost(): contact block out of range for " + contactName());
+
+  const Eigen::Vector3d f_act = x.segment<3>(off);
+  const Eigen::Vector3d f_ref = this->reference();
+  const Eigen::Vector3d e = f_act - f_ref;
+
+  last_f_act_ = f_act;
+  has_last_f_act_ = true;
+
+  cost_ = 0.5 * this->weight() * e.squaredNorm();
 }
 
 void WrenchImpl::publish()
 {
+  if(!rt_pub_) return;
+
   if(rt_pub_->trylock())
   {
-    rt_pub_->msg_.header.frame_id = getBaseLink();
+    rt_pub_->msg_.header.frame_id = WORLD_FRAME_NAME;
     rt_pub_->msg_.header.stamp = task_nh_->now();
 
-    // FIXME
-    // ACTUAL VALUES
-    //getActualPose(tmp_vector3d_);
-    //// Pose - Translation
-    //wolf_controller_utils::vector3dToVector3(tmp_vector3d_,rt_pub_->msg_.position_actual);
-    //// Velocity reference
-    //tmp_vector3d_ = getCachedVelocityReference();
-    //wolf_controller_utils::vector3dToVector3(tmp_vector3d_,rt_pub_->msg_.velocity_reference);
+    const Eigen::Vector3d f_ref = this->reference();
+    rt_pub_->msg_.wrench_reference.force.x = f_ref.x();
+    rt_pub_->msg_.wrench_reference.force.y = f_ref.y();
+    rt_pub_->msg_.wrench_reference.force.z = f_ref.z();
+    rt_pub_->msg_.wrench_reference.torque.x = 0.0;
+    rt_pub_->msg_.wrench_reference.torque.y = 0.0;
+    rt_pub_->msg_.wrench_reference.torque.z = 0.0;
 
-    // REFERENCE VALUES
-    //getReference(tmp_vectorXd_);
-    //// Pose - Translation
-    //wolf_controller_utils::vector3dToVector3(tmp_vector3d_,rt_pub_->msg_.position_reference);
+    if(has_last_f_act_)
+    {
+      rt_pub_->msg_.wrench_actual.force.x = last_f_act_.x();
+      rt_pub_->msg_.wrench_actual.force.y = last_f_act_.y();
+      rt_pub_->msg_.wrench_actual.force.z = last_f_act_.z();
+    }
+    else
+    {
+      rt_pub_->msg_.wrench_actual.force.x = 0.0;
+      rt_pub_->msg_.wrench_actual.force.y = 0.0;
+      rt_pub_->msg_.wrench_actual.force.z = 0.0;
+    }
 
-    // COST
+    rt_pub_->msg_.wrench_actual.torque.x = 0.0;
+    rt_pub_->msg_.wrench_actual.torque.y = 0.0;
+    rt_pub_->msg_.wrench_actual.torque.z = 0.0;
     rt_pub_->msg_.cost = cost_;
 
     rt_pub_->unlockAndPublish();
   }
 }
 
-void WrenchImpl::_update(const Eigen::VectorXd& x)
-{
-  if(OPTIONS.set_ext_lambda)
-    setLambda(buffer_lambda1_);
-  if(OPTIONS.set_ext_weight)
-    setWeight(buffer_weight_diag_);
-  if(OPTIONS.set_ext_reference)
-  {
-    // Set external reference
-    setReference(*buffer_reference_.readFromRT());
-  }
-  OpenSoT::tasks::force::Wrench::_update(x);
-}
-
 bool WrenchImpl::reset()
 {
-  //bool res = OpenSoT::tasks::force::Wrench::reset(); // Task's reset (FIXME it is not implemented in OpenSoT)
-  bool res = true;
-  getReference(tmp_vectorXd_);
-  buffer_reference_.initRT(tmp_vectorXd_);
-  //getActualPose(tmp_vector3d_);
-  //tmp_affine3d_ = Eigen::Affine3d::Identity();
-  //tmp_affine3d_.translation() = tmp_vector3d_;
-  //trj_->reset(tmp_affine3d_);
-  return res;
+  this->WrenchTask::reset();
+  buffer_reference_force_.initRT(Eigen::Vector3d::Zero());
+  has_last_f_act_ = false;
+  last_f_act_.setZero();
+
+  buffer_lambda1_ = this->getLambda1();
+  buffer_weight_diag_ = this->weight();
+  return true;
 }
 
 void WrenchImpl::referenceCallback(const wolf_msgs::msg::Wrench::SharedPtr msg)
 {
-  double period = period_;
+  Eigen::Vector3d f = Eigen::Vector3d::Zero();
+  f.x() = msg->wrench.force.x;
+  f.y() = msg->wrench.force.y;
+  f.z() = msg->wrench.force.z;
 
-  if (last_time_ != 0.0)
-      period = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9 - last_time_;
-
-  Eigen::Vector6d reference = Eigen::Vector6d::Zero();
-  reference(0) = msg->wrench.force.x;
-  reference(1) = msg->wrench.force.y;
-  reference(2) = msg->wrench.force.z;
-  buffer_reference_.writeFromNonRT(reference);
-
+  buffer_reference_force_.writeFromNonRT(f);
   last_time_ = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9;
 }
+
+} // namespace wolf_wbid

@@ -18,6 +18,9 @@
 
 namespace wolf_wbid {
 
+class QuadrupedRobot;
+class IDVariables;
+
 // Com
 class ComImpl : public Com, public TaskRosHandler<wolf_msgs::msg::ComTask>
 {
@@ -27,8 +30,9 @@ public:
   typedef std::shared_ptr<ComImpl> Ptr;
 
   ComImpl(const std::string& robot_name,
+          const std::string& task_id,
           QuadrupedRobot& robot,
-          const OpenSoT::AffineHelper& qddot,
+          const IDVariables& vars,
           const double& period = 0.001);
 
   virtual void registerReconfigurableVariables() override;
@@ -41,9 +45,11 @@ public:
 
   virtual bool reset() override;
 
-private:
+protected:
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;
 
-  virtual void _update(const Eigen::VectorXd& x) override;
+private:
 
   void referenceCallback(const wolf_msgs::msg::Com::SharedPtr msg);
 

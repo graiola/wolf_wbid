@@ -14,6 +14,9 @@
 
 namespace wolf_wbid {
 
+class QuadrupedRobot;
+class IDVariables;
+
 // AngularMomentum
 class AngularMomentumImpl : public AngularMomentum, public TaskRosHandler<wolf_msgs::msg::CartesianTask>
 {
@@ -23,8 +26,9 @@ public:
   typedef std::shared_ptr<AngularMomentumImpl> Ptr;
 
   AngularMomentumImpl(const std::string& robot_name,
+                      const std::string& task_id,
                       QuadrupedRobot& robot,
-                      const OpenSoT::AffineHelper& qddot,
+                      const IDVariables& vars,
                       const double& period = 0.001);
 
   virtual void registerReconfigurableVariables() override;
@@ -33,11 +37,13 @@ public:
 
   virtual void updateCost(const Eigen::VectorXd& x) override;
 
-  virtual void update(const Eigen::VectorXd& x);
-
   virtual void publish();
 
   virtual bool reset() override;
+
+protected:
+  void applyExternalKnobs() override;
+  void applyExternalReference() override;
 
 };
 

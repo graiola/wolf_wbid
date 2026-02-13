@@ -7,6 +7,8 @@
 
 // WoLF
 #include <wolf_wbid/ros2/cartesian.h>
+#include <wolf_wbid/core/quadruped_robot.h>
+#include <wolf_wbid/wbid/id_variables.h>
 #include <wolf_controller_utils/converters.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -22,7 +24,7 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
                      QuadrupedRobot& robot,
                      const std::string& distal_link,
                      const std::string& base_link,
-                     const OpenSoT::AffineHelper& qddot,
+                     const IDVariables& vars,
                      const double& period,
                      const bool& use_mesh)
   :Cartesian(robot_name,
@@ -30,12 +32,12 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
              robot,
              distal_link,
              base_link,
-             qddot,
+             vars,
              period,
              use_mesh)
   ,TaskRosHandler<wolf_msgs::msg::CartesianTask>(task_id,robot_name,period)
   ,is_continuous_(true)
-  ,marker_name_("wolf_controller/marker/"+_task_id)
+  ,marker_name_("wolf_controller/marker/"+task_id)
   ,interactive_marker_server_(marker_name_,task_nh_)
   ,use_mesh_(use_mesh)
 {
@@ -65,7 +67,7 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
 
   // Create the reference subscriber
   reference_sub_ = task_nh_->create_subscription<wolf_msgs::msg::Cartesian>(
-      "reference/" + _task_id, 1000, std::bind(&CartesianImpl::referenceCallback, this, std::placeholders::_1));
+      "reference/" + task_id, 1000, std::bind(&CartesianImpl::referenceCallback, this, std::placeholders::_1));
 }
 
 void CartesianImpl::registerReconfigurableVariables()
@@ -105,9 +107,9 @@ void CartesianImpl::loadParams()
   lambda2 = getLambda2();
   weight  = getWeight()(0, 0);
 
-  lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda1", lambda1);
-  lambda2 = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".lambda2", lambda2);
-  weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+_task_id+".weight",  weight);
+  lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+task_name_+".lambda1", lambda1);
+  lambda2 = get_double_parameter_from_remote_node("wolf_controller/gains."+task_name_+".lambda2", lambda2);
+  weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+task_name_+".weight",  weight);
 
   if (lambda1 < 0.0 || lambda2 < 0.0 || weight < 0.0)
     throw std::runtime_error("Lambda and weight must be positive!");
@@ -117,7 +119,9 @@ void CartesianImpl::loadParams()
   buffer_weight_diag_ = weight;
 
   setLambda(lambda1, lambda2);
-  setWeight(weight);
+  Eigen::Matrix6d W = Eigen::Matrix6d::Identity();
+  W.diagonal().setConstant(weight);
+  setWeight(Eigen::MatrixXd(W));
 
   Eigen::Matrix6d Kp = Eigen::Matrix6d::Zero();
   Eigen::Matrix6d Kd = Eigen::Matrix6d::Zero();
@@ -125,8 +129,8 @@ void CartesianImpl::loadParams()
   bool use_identity = false;
   for (unsigned int i = 0; i < wolf_controller_utils::_cartesian_names.size(); i++)
   {
-    Kp(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + _task_id + ".Kp." + wolf_controller_utils::_cartesian_names[i], 0.0);
-    Kd(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + _task_id + ".Kd." + wolf_controller_utils::_cartesian_names[i], 0.0);
+    Kp(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + task_name_ + ".Kp." + wolf_controller_utils::_cartesian_names[i], 0.0);
+    Kd(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + task_name_ + ".Kd." + wolf_controller_utils::_cartesian_names[i], 0.0);
 
     if (Kp(i, i) < 0.0 || Kd(i, i) < 0.0)
       use_identity = true;
@@ -138,55 +142,77 @@ void CartesianImpl::loadParams()
     Kd = Eigen::Matrix6d::Identity();
   }
 
+  buffer_kp_x_ = Kp(0,0);
+  buffer_kp_y_ = Kp(1,1);
+  buffer_kp_z_ = Kp(2,2);
+  buffer_kp_roll_ = Kp(3,3);
+  buffer_kp_pitch_ = Kp(4,4);
+  buffer_kp_yaw_ = Kp(5,5);
+
+  buffer_kd_x_ = Kd(0,0);
+  buffer_kd_y_ = Kd(1,1);
+  buffer_kd_z_ = Kd(2,2);
+  buffer_kd_roll_ = Kd(3,3);
+  buffer_kd_pitch_ = Kd(4,4);
+  buffer_kd_yaw_ = Kd(5,5);
+
   setKp(Kp);
   setKd(Kd);
 }
 
-void CartesianImpl::_update(const Eigen::VectorXd& x)
+void CartesianImpl::applyExternalKnobs()
 {
   if(OPTIONS.set_ext_lambda)
-    setLambda(buffer_lambda1_,buffer_lambda2_);
+    setLambda(buffer_lambda1_.load(), buffer_lambda2_.load());
   if(OPTIONS.set_ext_weight)
-    setWeight(buffer_weight_diag_);
+  {
+    Eigen::Matrix6d W = Eigen::Matrix6d::Identity();
+    W.diagonal().setConstant(buffer_weight_diag_.load());
+    setWeight(Eigen::MatrixXd(W));
+  }
   if(OPTIONS.set_ext_gains)
   {
     tmp_matrix6d_.setZero();
-    tmp_matrix6d_(0,0) = buffer_kp_x_;
-    tmp_matrix6d_(1,1) = buffer_kp_y_;
-    tmp_matrix6d_(2,2) = buffer_kp_z_;
-    tmp_matrix6d_(3,3) = buffer_kp_roll_;
-    tmp_matrix6d_(4,4) = buffer_kp_pitch_;
-    tmp_matrix6d_(5,5) = buffer_kp_yaw_;
+    tmp_matrix6d_(0,0) = buffer_kp_x_.load();
+    tmp_matrix6d_(1,1) = buffer_kp_y_.load();
+    tmp_matrix6d_(2,2) = buffer_kp_z_.load();
+    tmp_matrix6d_(3,3) = buffer_kp_roll_.load();
+    tmp_matrix6d_(4,4) = buffer_kp_pitch_.load();
+    tmp_matrix6d_(5,5) = buffer_kp_yaw_.load();
     setKp(tmp_matrix6d_);
     tmp_matrix6d_.setZero();
-    tmp_matrix6d_(0,0) = buffer_kd_x_;
-    tmp_matrix6d_(1,1) = buffer_kd_y_;
-    tmp_matrix6d_(2,2) = buffer_kd_z_;
-    tmp_matrix6d_(3,3) = buffer_kd_roll_;
-    tmp_matrix6d_(4,4) = buffer_kd_pitch_;
-    tmp_matrix6d_(5,5) = buffer_kd_yaw_;
+    tmp_matrix6d_(0,0) = buffer_kd_x_.load();
+    tmp_matrix6d_(1,1) = buffer_kd_y_.load();
+    tmp_matrix6d_(2,2) = buffer_kd_z_.load();
+    tmp_matrix6d_(3,3) = buffer_kd_roll_.load();
+    tmp_matrix6d_(4,4) = buffer_kd_pitch_.load();
+    tmp_matrix6d_(5,5) = buffer_kd_yaw_.load();
     setKd(tmp_matrix6d_);
   }
+}
+
+void CartesianImpl::applyExternalReference()
+{
   if(OPTIONS.set_ext_reference)
   {
-    if(is_continuous_) // Direct control
+    if(is_continuous_)
     {
-      //setReference(*buffer_reference_pose_.readFromRT());
       setReference(*buffer_reference_pose_.readFromRT(),*buffer_reference_twist_.readFromRT());
     }
-    else // Interpolation
+    else
     {
       trj_->update(period_);
       trj_->getReference(tmp_affine3d_,&tmp_vector6d_);
       setReference(tmp_affine3d_,tmp_vector6d_);
     }
   }
-  OpenSoT::tasks::acceleration::Cartesian::_update(x);
 }
 
 void CartesianImpl::updateCost(const Eigen::VectorXd& x)
 {
-  cost_ = computeCost(x);
+  const Eigen::VectorXd r = A() * x - b();
+  const Eigen::VectorXd wd = wDiag();
+  cost_ = 0.5 * (r.array().square() * wd.array()).sum();
 }
 
 void CartesianImpl::publish()
@@ -222,7 +248,7 @@ void CartesianImpl::publish()
 
 bool CartesianImpl::reset()
 {
-  bool res = OpenSoT::tasks::acceleration::Cartesian::reset(); // Task's reset
+  const bool res = CartesianTask::reset();
   makeMarker(getDistalLink(), getBaseLink(), static_cast<unsigned int>(control_type_), true);
   menu_handler_.apply(interactive_marker_server_,marker_name_);
   interactive_marker_server_.applyChanges();
@@ -708,8 +734,6 @@ void CartesianImpl::changeBaseLink(const visualization_msgs::msg::InteractiveMar
                static_cast<unsigned int>(control_type_), true);
 
     // Keep marker aligned with current reference (avoid jump to origin)
-    Eigen::Affine3d pose_ref;
-    getReference(pose_ref);
     geometry_msgs::msg::Pose pose_msg;
     wolf_controller_utils::affine3dToPose(pose_ref, pose_msg);
     interactive_marker_server_.setPose(interactive_marker_.name, pose_msg);
