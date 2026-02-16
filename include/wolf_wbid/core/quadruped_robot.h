@@ -12,6 +12,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <set>
 
 // Eigen
 #include <Eigen/Core>
