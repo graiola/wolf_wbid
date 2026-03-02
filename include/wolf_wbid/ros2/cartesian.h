@@ -192,6 +192,7 @@ private:
 
 
   typename rclcpp::Subscription<wolf_msgs::msg::Cartesian>::SharedPtr reference_sub_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 
 };
 

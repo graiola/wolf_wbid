@@ -57,6 +57,7 @@ private:
   realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_vel_;
 
   typename rclcpp::Subscription<wolf_msgs::msg::Com>::SharedPtr reference_sub_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 
 };
 

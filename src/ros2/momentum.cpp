@@ -7,6 +7,8 @@
 #include <wolf_controller_utils/converters.h>
 #include <wolf_controller_utils/ros2_param_getter.h>
 
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace wolf_wbid {
@@ -23,15 +25,54 @@ AngularMomentumImpl::AngularMomentumImpl(const std::string& robot_name,
 
 void AngularMomentumImpl::registerReconfigurableVariables()
 {
-  const double lambda1 = getLambda();
-  const double weight  = getWeight()(0,0);
   const Eigen::Matrix3d K = getMomentumGain();
 
-  TaskWrapperInterface::setLambda1(lambda1);
-  TaskWrapperInterface::setWeightDiag(weight);
-  TaskWrapperInterface::setKpRoll(K(0,0));
-  TaskWrapperInterface::setKpPitch(K(1,1));
-  TaskWrapperInterface::setKpYaw(K(2,2));
+  const auto declare_or_get = [this](const std::string& name, double default_value) {
+    if(!task_nh_->has_parameter(name))
+      task_nh_->declare_parameter<double>(name, default_value);
+    double value = default_value;
+    task_nh_->get_parameter(name, value);
+    return value;
+  };
+
+  TaskWrapperInterface::setLambda1(declare_or_get("set_lambda_1", getLambda()));
+  TaskWrapperInterface::setWeightDiag(declare_or_get("set_weight_diag", getWeight()(0,0)));
+  TaskWrapperInterface::setKpRoll(declare_or_get("K_roll", K(0,0)));
+  TaskWrapperInterface::setKpPitch(declare_or_get("K_pitch", K(1,1)));
+  TaskWrapperInterface::setKpYaw(declare_or_get("K_yaw", K(2,2)));
+
+  param_cb_handle_ = task_nh_->add_on_set_parameters_callback(
+      [this](const std::vector<rclcpp::Parameter>& params) {
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+        result.reason = "ok";
+
+        auto reject = [&](const std::string& reason) {
+          result.successful = false;
+          result.reason = reason;
+        };
+
+        for(const auto& param : params)
+        {
+          if(param.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE)
+            continue;
+
+          const std::string& name = param.get_name();
+          const double value = param.as_double();
+          if(!std::isfinite(value) || value < 0.0)
+          {
+            reject("Task parameters must be finite and >= 0");
+            break;
+          }
+
+          if(name == "set_lambda_1") TaskWrapperInterface::setLambda1(value);
+          else if(name == "set_weight_diag") TaskWrapperInterface::setWeightDiag(value);
+          else if(name == "K_roll") TaskWrapperInterface::setKpRoll(value);
+          else if(name == "K_pitch") TaskWrapperInterface::setKpPitch(value);
+          else if(name == "K_yaw") TaskWrapperInterface::setKpYaw(value);
+        }
+        return result;
+      });
 }
 
 void AngularMomentumImpl::loadParams()
@@ -39,13 +80,16 @@ void AngularMomentumImpl::loadParams()
   double lambda1 = getLambda();
   double weight  = getWeight()(0,0);
 
-  lambda1 = wolf_controller_utils::get_double_parameter_from_remote_node(
-      "wolf_controller/gains." + task_name_ + ".lambda1", lambda1);
-  weight = wolf_controller_utils::get_double_parameter_from_remote_node(
-      "wolf_controller/gains." + task_name_ + ".weight", weight);
+  const auto get_task_param = [this](const std::string& key, double default_value) {
+    return wolf_controller_utils::get_double_parameter_from_remote_controller_node(
+        robot_name_, "gains." + task_name_ + "." + key, default_value);
+  };
 
-  if(lambda1 < 0.0 || weight < 0.0)
-    throw std::runtime_error("AngularMomentumImpl::loadParams(): lambda/weight must be >= 0");
+  lambda1 = get_task_param("lambda1", lambda1);
+  weight  = get_task_param("weight", weight);
+
+  if(!std::isfinite(lambda1) || lambda1 < 0.0) lambda1 = getLambda();
+  if(!std::isfinite(weight)  || weight  < 0.0) weight  = getWeight()(0,0);
 
   buffer_lambda1_ = lambda1;
   buffer_weight_diag_ = weight;
@@ -58,9 +102,8 @@ void AngularMomentumImpl::loadParams()
   bool use_identity = false;
   for(unsigned int i = 0; i < wolf_controller_utils::_rpy.size(); i++)
   {
-    K(i, i) = wolf_controller_utils::get_double_parameter_from_remote_node(
-        "wolf_controller/gains." + task_name_ + ".K." + wolf_controller_utils::_rpy[i], K(i, i));
-    if(K(i, i) < 0.0)
+    K(i, i) = get_task_param("K." + wolf_controller_utils::_rpy[i], std::numeric_limits<double>::quiet_NaN());
+    if(!std::isfinite(K(i, i)) || K(i, i) < 0.0)
       use_identity = true;
   }
 

@@ -6,6 +6,7 @@
 #include <wolf_wbid/ros2/wrench.h>
 #include <wolf_controller_utils/ros2_param_getter.h>
 
+#include <cmath>
 #include <stdexcept>
 
 namespace wolf_wbid {
@@ -32,8 +33,46 @@ WrenchImpl::WrenchImpl(const std::string& robot_name,
 
 void WrenchImpl::registerReconfigurableVariables()
 {
-  TaskWrapperInterface::setLambda1(this->getLambda1());
-  TaskWrapperInterface::setWeightDiag(this->weight());
+  const auto declare_or_get = [this](const std::string& name, double default_value) {
+    if(!task_nh_->has_parameter(name))
+      task_nh_->declare_parameter<double>(name, default_value);
+    double value = default_value;
+    task_nh_->get_parameter(name, value);
+    return value;
+  };
+
+  TaskWrapperInterface::setLambda1(declare_or_get("set_lambda_1", this->getLambda1()));
+  TaskWrapperInterface::setWeightDiag(declare_or_get("set_weight_diag", this->weight()));
+
+  param_cb_handle_ = task_nh_->add_on_set_parameters_callback(
+      [this](const std::vector<rclcpp::Parameter>& params) {
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+        result.reason = "ok";
+
+        auto reject = [&](const std::string& reason) {
+          result.successful = false;
+          result.reason = reason;
+        };
+
+        for(const auto& param : params)
+        {
+          if(param.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE)
+            continue;
+
+          const std::string& name = param.get_name();
+          const double value = param.as_double();
+          if(!std::isfinite(value) || value < 0.0)
+          {
+            reject("Task parameters must be finite and >= 0");
+            break;
+          }
+
+          if(name == "set_lambda_1") TaskWrapperInterface::setLambda1(value);
+          else if(name == "set_weight_diag") TaskWrapperInterface::setWeightDiag(value);
+        }
+        return result;
+      });
 }
 
 void WrenchImpl::loadParams()
@@ -41,13 +80,16 @@ void WrenchImpl::loadParams()
   double lambda1 = this->getLambda1();
   double weight = this->weight();
 
-  lambda1 = wolf_controller_utils::get_double_parameter_from_remote_node(
-      "wolf_controller/gains." + task_name_ + ".lambda1", lambda1);
-  weight = wolf_controller_utils::get_double_parameter_from_remote_node(
-      "wolf_controller/gains." + task_name_ + ".weight", weight);
+  const auto get_task_param = [this](const std::string& key, double default_value) {
+    return wolf_controller_utils::get_double_parameter_from_remote_controller_node(
+        robot_name_, "gains." + task_name_ + "." + key, default_value);
+  };
 
-  if(lambda1 < 0.0 || weight < 0.0)
-    throw std::runtime_error("WrenchImpl::loadParams(): lambda/weight must be >= 0");
+  lambda1 = get_task_param("lambda1", lambda1);
+  weight  = get_task_param("weight", weight);
+
+  if(!std::isfinite(lambda1) || lambda1 < 0.0) lambda1 = this->getLambda1();
+  if(!std::isfinite(weight)  || weight  < 0.0) weight  = this->weight();
 
   buffer_lambda1_ = lambda1;
   buffer_weight_diag_ = weight;

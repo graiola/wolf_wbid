@@ -45,6 +45,9 @@ protected:
   void applyExternalKnobs() override;
   void applyExternalReference() override;
 
+private:
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
+
 };
 
 } // namespace

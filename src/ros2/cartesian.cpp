@@ -16,6 +16,9 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <wolf_controller_utils/ros2_param_getter.h>
 
+#include <cmath>
+#include <limits>
+
 using namespace wolf_controller_utils;
 using namespace wolf_wbid;
 
@@ -72,47 +75,97 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
 
 void CartesianImpl::registerReconfigurableVariables()
 {
-  // Register dynamic reconfigurable variables (adapt ROS2 Dynamic Parameters or alternative service approach)
-  double lambda1 = getLambda();
-  double lambda2 = getLambda2();
-  double weight  = getWeight()(0,0);
-  Eigen::Matrix6d Kp = getKp();
-  Eigen::Matrix6d Kd = getKd();
+  const Eigen::Matrix6d Kp = getKp();
+  const Eigen::Matrix6d Kd = getKd();
 
-  // Load the tmp variables used in _update
-  TaskWrapperInterface::setLambda1(lambda1);
-  TaskWrapperInterface::setLambda2(lambda2);
-  TaskWrapperInterface::setWeightDiag(weight);
+  const auto declare_or_get = [this](const std::string& name, double default_value) {
+    if(!task_nh_->has_parameter(name))
+      task_nh_->declare_parameter<double>(name, default_value);
+    double value = default_value;
+    task_nh_->get_parameter(name, value);
+    return value;
+  };
 
-  TaskWrapperInterface::setKpX(Kp(0,0));
-  TaskWrapperInterface::setKpY(Kp(1,1));
-  TaskWrapperInterface::setKpZ(Kp(2,2));
-  TaskWrapperInterface::setKpRoll(Kp(3,3));
-  TaskWrapperInterface::setKpPitch(Kp(4,4));
-  TaskWrapperInterface::setKpYaw(Kp(5,5));
+  TaskWrapperInterface::setLambda1(declare_or_get("set_lambda_1", getLambda()));
+  TaskWrapperInterface::setLambda2(declare_or_get("set_lambda_2", getLambda2()));
+  TaskWrapperInterface::setWeightDiag(declare_or_get("set_weight_diag", getWeight()(0,0)));
 
-  TaskWrapperInterface::setKdX(Kd(0,0));
-  TaskWrapperInterface::setKdY(Kd(1,1));
-  TaskWrapperInterface::setKdZ(Kd(2,2));
-  TaskWrapperInterface::setKdRoll(Kd(3,3));
-  TaskWrapperInterface::setKdPitch(Kd(4,4));
-  TaskWrapperInterface::setKdYaw(Kd(5,5));
+  TaskWrapperInterface::setKpX(declare_or_get("kp_x", Kp(0,0)));
+  TaskWrapperInterface::setKpY(declare_or_get("kp_y", Kp(1,1)));
+  TaskWrapperInterface::setKpZ(declare_or_get("kp_z", Kp(2,2)));
+  TaskWrapperInterface::setKpRoll(declare_or_get("kp_roll", Kp(3,3)));
+  TaskWrapperInterface::setKpPitch(declare_or_get("kp_pitch", Kp(4,4)));
+  TaskWrapperInterface::setKpYaw(declare_or_get("kp_yaw", Kp(5,5)));
+
+  TaskWrapperInterface::setKdX(declare_or_get("kd_x", Kd(0,0)));
+  TaskWrapperInterface::setKdY(declare_or_get("kd_y", Kd(1,1)));
+  TaskWrapperInterface::setKdZ(declare_or_get("kd_z", Kd(2,2)));
+  TaskWrapperInterface::setKdRoll(declare_or_get("kd_roll", Kd(3,3)));
+  TaskWrapperInterface::setKdPitch(declare_or_get("kd_pitch", Kd(4,4)));
+  TaskWrapperInterface::setKdYaw(declare_or_get("kd_yaw", Kd(5,5)));
+
+  param_cb_handle_ = task_nh_->add_on_set_parameters_callback(
+      [this](const std::vector<rclcpp::Parameter>& params) {
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+        result.reason = "ok";
+
+        auto reject = [&](const std::string& reason) {
+          result.successful = false;
+          result.reason = reason;
+        };
+
+        for(const auto& param : params)
+        {
+          if(param.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE)
+            continue;
+
+          const std::string& name = param.get_name();
+          const double value = param.as_double();
+          if(!std::isfinite(value) || value < 0.0)
+          {
+            reject("Task parameters must be finite and >= 0");
+            break;
+          }
+
+          if(name == "set_lambda_1") TaskWrapperInterface::setLambda1(value);
+          else if(name == "set_lambda_2") TaskWrapperInterface::setLambda2(value);
+          else if(name == "set_weight_diag") TaskWrapperInterface::setWeightDiag(value);
+          else if(name == "kp_x") TaskWrapperInterface::setKpX(value);
+          else if(name == "kp_y") TaskWrapperInterface::setKpY(value);
+          else if(name == "kp_z") TaskWrapperInterface::setKpZ(value);
+          else if(name == "kp_roll") TaskWrapperInterface::setKpRoll(value);
+          else if(name == "kp_pitch") TaskWrapperInterface::setKpPitch(value);
+          else if(name == "kp_yaw") TaskWrapperInterface::setKpYaw(value);
+          else if(name == "kd_x") TaskWrapperInterface::setKdX(value);
+          else if(name == "kd_y") TaskWrapperInterface::setKdY(value);
+          else if(name == "kd_z") TaskWrapperInterface::setKdZ(value);
+          else if(name == "kd_roll") TaskWrapperInterface::setKdRoll(value);
+          else if(name == "kd_pitch") TaskWrapperInterface::setKdPitch(value);
+          else if(name == "kd_yaw") TaskWrapperInterface::setKdYaw(value);
+        }
+        return result;
+      });
 }
 
 void CartesianImpl::loadParams()
 {
-  // Example of parameter handling with ROS2 parameters
-  double lambda1, lambda2, weight;
-  lambda1 = getLambda();
-  lambda2 = getLambda2();
-  weight  = getWeight()(0, 0);
+  double lambda1 = getLambda();
+  double lambda2 = getLambda2();
+  double weight  = getWeight()(0, 0);
 
-  lambda1 = get_double_parameter_from_remote_node("wolf_controller/gains."+task_name_+".lambda1", lambda1);
-  lambda2 = get_double_parameter_from_remote_node("wolf_controller/gains."+task_name_+".lambda2", lambda2);
-  weight  = get_double_parameter_from_remote_node("wolf_controller/gains."+task_name_+".weight",  weight);
+  const auto get_task_param = [this](const std::string& key, double default_value) {
+    return wolf_controller_utils::get_double_parameter_from_remote_controller_node(
+        robot_name_, "gains." + task_name_ + "." + key, default_value);
+  };
 
-  if (lambda1 < 0.0 || lambda2 < 0.0 || weight < 0.0)
-    throw std::runtime_error("Lambda and weight must be positive!");
+  lambda1 = get_task_param("lambda1", lambda1);
+  lambda2 = get_task_param("lambda2", lambda2);
+  weight  = get_task_param("weight",  weight);
+
+  if(!std::isfinite(lambda1) || lambda1 < 0.0) lambda1 = getLambda();
+  if(!std::isfinite(lambda2) || lambda2 < 0.0) lambda2 = getLambda2();
+  if(!std::isfinite(weight)  || weight  < 0.0) weight  = getWeight()(0,0);
 
   buffer_lambda1_ = lambda1;
   buffer_lambda2_ = lambda2;
@@ -129,10 +182,10 @@ void CartesianImpl::loadParams()
   bool use_identity = false;
   for (unsigned int i = 0; i < wolf_controller_utils::_cartesian_names.size(); i++)
   {
-    Kp(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + task_name_ + ".Kp." + wolf_controller_utils::_cartesian_names[i], 0.0);
-    Kd(i, i) = get_double_parameter_from_remote_node("wolf_controller/gains." + task_name_ + ".Kd." + wolf_controller_utils::_cartesian_names[i], 0.0);
+    Kp(i, i) = get_task_param("Kp." + wolf_controller_utils::_cartesian_names[i], std::numeric_limits<double>::quiet_NaN());
+    Kd(i, i) = get_task_param("Kd." + wolf_controller_utils::_cartesian_names[i], std::numeric_limits<double>::quiet_NaN());
 
-    if (Kp(i, i) < 0.0 || Kd(i, i) < 0.0)
+    if (!std::isfinite(Kp(i, i)) || !std::isfinite(Kd(i, i)) || Kp(i, i) < 0.0 || Kd(i, i) < 0.0)
       use_identity = true;
   }
 
@@ -158,6 +211,18 @@ void CartesianImpl::loadParams()
 
   setKp(Kp);
   setKd(Kd);
+
+  const std::string type = wolf_controller_utils::get_string_parameter_from_remote_controller_node(
+      robot_name_, "gains." + task_name_ + ".type", "");
+  if(!type.empty())
+  {
+    if(type == "acceleration")
+      setGainType(CartesianTask::GainType::Acceleration);
+    else if(type == "force")
+      setGainType(CartesianTask::GainType::Force);
+    else
+      throw std::runtime_error("Wrong gain type, possible values are 'acceleration' or 'force'");
+  }
 }
 
 void CartesianImpl::applyExternalKnobs()

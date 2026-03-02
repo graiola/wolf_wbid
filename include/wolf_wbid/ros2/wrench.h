@@ -58,6 +58,7 @@ private:
   bool has_last_f_act_{false};
 
   typename rclcpp::Subscription<wolf_msgs::msg::Wrench>::SharedPtr reference_sub_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 
 };
 
