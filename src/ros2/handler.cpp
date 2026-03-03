@@ -9,17 +9,33 @@
 
 using namespace wolf_wbid;
 
+namespace {
+
+std::string normalize_namespace_token(std::string ns)
+{
+  while(!ns.empty() && ns.front() == '/')
+    ns.erase(ns.begin());
+  while(!ns.empty() && ns.back() == '/')
+    ns.pop_back();
+  return ns;
+}
+
+std::string build_controller_namespace(const std::string& robot_name)
+{
+  const std::string robot_ns = normalize_namespace_token(robot_name);
+  if(robot_ns.empty())
+    return "/wolf_controller";
+  return "/" + robot_ns + "/wolf_controller";
+}
+
+} // namespace
+
 template<class Msg_type>
 TaskRosHandler<Msg_type>::TaskRosHandler(const std::string& task_name, const std::string& robot_name, const double& period)
 {
-  //std::string node_name_prefix;
-  //if(!robot_name.empty())
-  //  node_name_prefix = robot_name+"/";
-  //else
-  //  node_name_prefix = robot_name;
-
-  //nh_= std::make_shared<rclcpp::Node>(node_name_prefix+"wolf_controller");
-  task_nh_= std::make_shared<rclcpp::Node>("wolf_controller_"+task_name);
+  task_nh_= std::make_shared<rclcpp::Node>(
+      task_name,
+      build_controller_namespace(robot_name));
 
   //ddr_server_ = std::make_shared<ddynamic_reconfigure::DDynamicReconfigure>(this);
   auto pub = task_nh_->create_publisher<Msg_type>(task_name, 4);

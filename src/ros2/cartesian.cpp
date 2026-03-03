@@ -40,7 +40,7 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
              use_mesh)
   ,TaskRosHandler<wolf_msgs::msg::CartesianTask>(task_id,robot_name,period)
   ,is_continuous_(true)
-  ,marker_name_("wolf_controller/marker/"+task_id)
+  ,marker_name_("marker/"+task_id)
   ,interactive_marker_server_(marker_name_,task_nh_)
   ,use_mesh_(use_mesh)
 {
@@ -315,7 +315,7 @@ bool CartesianImpl::reset()
 {
   const bool res = CartesianTask::reset();
   makeMarker(getDistalLink(), getBaseLink(), static_cast<unsigned int>(control_type_), true);
-  menu_handler_.apply(interactive_marker_server_,marker_name_);
+  menu_handler_.apply(interactive_marker_server_, interactive_marker_.name);
   interactive_marker_server_.applyChanges();
   waypoints_.clear();
   publishWP(waypoints_);
