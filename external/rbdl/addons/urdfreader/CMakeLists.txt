@@ -15,22 +15,43 @@ SET ( URDFREADER_SOURCES
 	urdfreader.cc
 	)
 
+SET (RBDL_USE_ROS_URDF_LIBRARY FALSE)
+
 IF (DEFINED ENV{ROS_ROOT})
 	MESSAGE (STATUS "ROS found: $ENV{ROS_ROOT}")
 	find_package(catkin REQUIRED COMPONENTS urdf)
-	OPTION (RBDL_USE_ROS_URDF_LIBRARY "Use the URDF library provided by ROS" ON)
+	SET (RBDL_USE_ROS_URDF_LIBRARY ON)
 	include_directories(${catkin_INCLUDE_DIRS})
 ELSE ()
-	SET (RBDL_USE_ROS_URDF_LIBRARY FALSE)
+	find_package(urdf QUIET)
+	if (urdf_FOUND)
+		MESSAGE (STATUS "ROS 2 urdf package found, using system URDF parser")
+		SET (RBDL_USE_ROS_URDF_LIBRARY ON)
+	else ()
+		find_package(urdfdom_headers QUIET)
+		find_package(urdfdom QUIET)
+		if (urdfdom_headers_FOUND AND urdfdom_FOUND)
+			MESSAGE (STATUS "urdfdom found, using system URDF parser")
+			SET (RBDL_USE_ROS_URDF_LIBRARY ON)
+		endif ()
+	endif ()
 ENDIF ()
 
 IF (RBDL_USE_ROS_URDF_LIBRARY)
-	#	find_package(Boost REQUIRED COMPONENTS system)
 	SET (URDFREADER_DEPENDENCIES
 		rbdl
-		${urdf_LIBRARIES}
-		#		${Boost_SYSTEM_LIBRARY}
 		)
+	if (DEFINED ENV{ROS_ROOT})
+		LIST (APPEND URDFREADER_DEPENDENCIES ${urdf_LIBRARIES})
+	elseif (TARGET urdf::urdf)
+		LIST (APPEND URDFREADER_DEPENDENCIES urdf::urdf)
+	elseif (TARGET urdfdom::urdf_parser)
+		LIST (APPEND URDFREADER_DEPENDENCIES
+			urdfdom::urdf_parser
+			urdfdom::urdfdom_model
+			urdfdom::urdfdom_world
+			urdfdom_headers::urdfdom_headers)
+	endif ()
 ELSE()
 	SET (URDFREADER_SOURCES
 		${URDFREADER_SOURCES}

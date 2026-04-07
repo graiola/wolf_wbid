@@ -11,7 +11,6 @@
 #ifdef RBDL_USE_ROS_URDF_LIBRARY
 #include <urdf_model/model.h>
 #include <urdf_parser/urdf_parser.h>
-#include "ros/ros.h"
 
 typedef std::shared_ptr<urdf::Link> LinkPtr;
 typedef const std::shared_ptr<const urdf::Link> ConstLinkPtr;
