@@ -36,6 +36,8 @@ public:
 
   virtual void registerReconfigurableVariables() override;
 
+  void activateRuntimeInterfaces() override { TaskRosHandler<wolf_msgs::msg::WrenchTask>::startSpinner(); }
+
   virtual void loadParams() override;
 
   virtual void updateCost(const Eigen::VectorXd& x) override;

@@ -33,9 +33,13 @@ public:
   ~TaskRosHandler();
 
 protected:
+  void startSpinner();
+
+  void stopSpinner();
 
   //std::shared_ptr<rclcpp::Node> nh_;
   std::shared_ptr<rclcpp::Node> task_nh_;
+  typename rclcpp::Publisher<Msg_type>::SharedPtr pub_;
 
   //std::shared_ptr<ddynamic_reconfigure::DDynamicReconfigure> ddr_server_;
   std::shared_ptr<realtime_tools::RealtimePublisher<Msg_type>> rt_pub_;

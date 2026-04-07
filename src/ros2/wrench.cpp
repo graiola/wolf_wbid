@@ -131,41 +131,39 @@ void WrenchImpl::updateCost(const Eigen::VectorXd& x)
 
 void WrenchImpl::publish()
 {
-  if(!rt_pub_) return;
+  if(!pub_) return;
 
-  if(rt_pub_->trylock())
+  wolf_msgs::msg::WrenchTask msg;
+  msg.header.frame_id = WORLD_FRAME_NAME;
+  msg.header.stamp = task_nh_->now();
+
+  const Eigen::Vector3d f_ref = this->reference();
+  msg.wrench_reference.force.x = f_ref.x();
+  msg.wrench_reference.force.y = f_ref.y();
+  msg.wrench_reference.force.z = f_ref.z();
+  msg.wrench_reference.torque.x = 0.0;
+  msg.wrench_reference.torque.y = 0.0;
+  msg.wrench_reference.torque.z = 0.0;
+
+  if(has_last_f_act_)
   {
-    rt_pub_->msg_.header.frame_id = WORLD_FRAME_NAME;
-    rt_pub_->msg_.header.stamp = task_nh_->now();
-
-    const Eigen::Vector3d f_ref = this->reference();
-    rt_pub_->msg_.wrench_reference.force.x = f_ref.x();
-    rt_pub_->msg_.wrench_reference.force.y = f_ref.y();
-    rt_pub_->msg_.wrench_reference.force.z = f_ref.z();
-    rt_pub_->msg_.wrench_reference.torque.x = 0.0;
-    rt_pub_->msg_.wrench_reference.torque.y = 0.0;
-    rt_pub_->msg_.wrench_reference.torque.z = 0.0;
-
-    if(has_last_f_act_)
-    {
-      rt_pub_->msg_.wrench_actual.force.x = last_f_act_.x();
-      rt_pub_->msg_.wrench_actual.force.y = last_f_act_.y();
-      rt_pub_->msg_.wrench_actual.force.z = last_f_act_.z();
-    }
-    else
-    {
-      rt_pub_->msg_.wrench_actual.force.x = 0.0;
-      rt_pub_->msg_.wrench_actual.force.y = 0.0;
-      rt_pub_->msg_.wrench_actual.force.z = 0.0;
-    }
-
-    rt_pub_->msg_.wrench_actual.torque.x = 0.0;
-    rt_pub_->msg_.wrench_actual.torque.y = 0.0;
-    rt_pub_->msg_.wrench_actual.torque.z = 0.0;
-    rt_pub_->msg_.cost = cost_;
-
-    rt_pub_->unlockAndPublish();
+    msg.wrench_actual.force.x = last_f_act_.x();
+    msg.wrench_actual.force.y = last_f_act_.y();
+    msg.wrench_actual.force.z = last_f_act_.z();
   }
+  else
+  {
+    msg.wrench_actual.force.x = 0.0;
+    msg.wrench_actual.force.y = 0.0;
+    msg.wrench_actual.force.z = 0.0;
+  }
+
+  msg.wrench_actual.torque.x = 0.0;
+  msg.wrench_actual.torque.y = 0.0;
+  msg.wrench_actual.torque.z = 0.0;
+  msg.cost = cost_;
+
+  pub_->publish(std::move(msg));
 }
 
 bool WrenchImpl::reset()

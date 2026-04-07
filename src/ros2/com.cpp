@@ -204,28 +204,26 @@ void ComImpl::updateCost(const Eigen::VectorXd& x)
 
 void ComImpl::publish()
 {
-  if(!rt_pub_) return;
+  if(!pub_) return;
 
-  if(rt_pub_->trylock())
-  {
-    rt_pub_->msg_.header.frame_id = getBaseLink();
-    rt_pub_->msg_.header.stamp = task_nh_->now();
+  wolf_msgs::msg::ComTask msg;
+  msg.header.frame_id = getBaseLink();
+  msg.header.stamp = task_nh_->now();
 
-    getActualPose(tmp_vector3d_);
-    wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.position_actual);
+  getActualPose(tmp_vector3d_);
+  wolf_controller_utils::vector3dToVector3(tmp_vector3d_, msg.position_actual);
 
-    getActualVelocity(tmp_vector3d_);
-    wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.velocity_actual);
+  getActualVelocity(tmp_vector3d_);
+  wolf_controller_utils::vector3dToVector3(tmp_vector3d_, msg.velocity_actual);
 
-    getReference(tmp_vector3d_);
-    wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.position_reference);
+  getReference(tmp_vector3d_);
+  wolf_controller_utils::vector3dToVector3(tmp_vector3d_, msg.position_reference);
 
-    tmp_vector3d_ = getCachedVelocityReference();
-    wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.velocity_reference);
+  tmp_vector3d_ = getCachedVelocityReference();
+  wolf_controller_utils::vector3dToVector3(tmp_vector3d_, msg.velocity_reference);
 
-    rt_pub_->msg_.cost = cost_;
-    rt_pub_->unlockAndPublish();
-  }
+  msg.cost = cost_;
+  pub_->publish(std::move(msg));
 }
 
 bool ComImpl::reset()

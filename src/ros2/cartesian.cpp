@@ -282,33 +282,32 @@ void CartesianImpl::updateCost(const Eigen::VectorXd& x)
 
 void CartesianImpl::publish()
 {
-  if(rt_pub_->trylock())
-  {
-    rt_pub_->msg_.header.frame_id = getBaseLink();
-    rt_pub_->msg_.header.stamp = task_nh_->now();  // ROS2 now() function
+  if(!pub_) return;
 
-    // ACTUAL VALUES
-    getActualPose(tmp_affine3d_);
-    getActualTwist(tmp_vector6d_);
-    wolf_controller_utils::rotToRpy(tmp_affine3d_.linear(), tmp_vector3d_);
-    wolf_controller_utils::affine3dToPose(tmp_affine3d_, rt_pub_->msg_.pose_actual);
-    wolf_controller_utils::vector6dToTwist(tmp_vector6d_, rt_pub_->msg_.twist_actual);
-    wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.rpy_actual);
+  wolf_msgs::msg::CartesianTask msg;
+  msg.header.frame_id = getBaseLink();
+  msg.header.stamp = task_nh_->now();
 
-    // REFERENCE VALUES
-    getReference(tmp_affine3d_);
-    tmp_vector6d_ = getCachedVelocityReference();
-    wolf_controller_utils::rotToRpy(tmp_affine3d_.linear(), tmp_vector3d_);
-    wolf_controller_utils::affine3dToPose(tmp_affine3d_, rt_pub_->msg_.pose_reference);
-    wolf_controller_utils::vector6dToTwist(tmp_vector6d_, rt_pub_->msg_.twist_reference);
-    wolf_controller_utils::vector3dToVector3(tmp_vector3d_, rt_pub_->msg_.rpy_reference);
+  // ACTUAL VALUES
+  getActualPose(tmp_affine3d_);
+  getActualTwist(tmp_vector6d_);
+  wolf_controller_utils::rotToRpy(tmp_affine3d_.linear(), tmp_vector3d_);
+  wolf_controller_utils::affine3dToPose(tmp_affine3d_, msg.pose_actual);
+  wolf_controller_utils::vector6dToTwist(tmp_vector6d_, msg.twist_actual);
+  wolf_controller_utils::vector3dToVector3(tmp_vector3d_, msg.rpy_actual);
 
-    // COST
-    rt_pub_->msg_.cost = cost_;
+  // REFERENCE VALUES
+  getReference(tmp_affine3d_);
+  tmp_vector6d_ = getCachedVelocityReference();
+  wolf_controller_utils::rotToRpy(tmp_affine3d_.linear(), tmp_vector3d_);
+  wolf_controller_utils::affine3dToPose(tmp_affine3d_, msg.pose_reference);
+  wolf_controller_utils::vector6dToTwist(tmp_vector6d_, msg.twist_reference);
+  wolf_controller_utils::vector3dToVector3(tmp_vector3d_, msg.rpy_reference);
 
-    // PUBLISH
-    rt_pub_->unlockAndPublish();
-  }
+  // COST
+  msg.cost = cost_;
+
+  pub_->publish(std::move(msg));
 }
 
 bool CartesianImpl::reset()

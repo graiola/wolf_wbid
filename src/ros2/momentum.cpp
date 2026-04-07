@@ -151,22 +151,20 @@ void AngularMomentumImpl::updateCost(const Eigen::VectorXd& x)
 
 void AngularMomentumImpl::publish()
 {
-  if(!rt_pub_) return;
+  if(!pub_) return;
 
-  if(rt_pub_->trylock())
-  {
-    rt_pub_->msg_.header.frame_id = WORLD_FRAME_NAME;
-    rt_pub_->msg_.header.stamp = task_nh_->now();
+  wolf_msgs::msg::CartesianTask msg;
+  msg.header.frame_id = WORLD_FRAME_NAME;
+  msg.header.stamp = task_nh_->now();
 
-    const Eigen::Vector3d L_act = getActualAngularMomentum();
-    const Eigen::Vector3d L_ref = getCachedDesiredAngularMomentum();
+  const Eigen::Vector3d L_act = getActualAngularMomentum();
+  const Eigen::Vector3d L_ref = getCachedDesiredAngularMomentum();
 
-    wolf_controller_utils::vector3dToVector3(L_act, rt_pub_->msg_.rpy_actual);
-    wolf_controller_utils::vector3dToVector3(L_ref, rt_pub_->msg_.rpy_reference);
+  wolf_controller_utils::vector3dToVector3(L_act, msg.rpy_actual);
+  wolf_controller_utils::vector3dToVector3(L_ref, msg.rpy_reference);
 
-    rt_pub_->msg_.cost = cost_;
-    rt_pub_->unlockAndPublish();
-  }
+  msg.cost = cost_;
+  pub_->publish(std::move(msg));
 }
 
 bool AngularMomentumImpl::reset()

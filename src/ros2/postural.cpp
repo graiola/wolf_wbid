@@ -20,17 +20,6 @@ PosturalImpl::PosturalImpl(const std::string& robot_name,
   , TaskRosHandler<wolf_msgs::msg::PosturalTask>(task_id, robot_name, period)
 {
   const std::size_t n = static_cast<std::size_t>(taskSize());
-  if(rt_pub_)
-  {
-    rt_pub_->msg_.name.resize(n);
-    rt_pub_->msg_.position_actual.resize(n);
-    rt_pub_->msg_.position_reference.resize(n);
-    rt_pub_->msg_.velocity_actual.resize(n);
-    rt_pub_->msg_.velocity_reference.resize(n);
-    rt_pub_->msg_.position_error.resize(n);
-    rt_pub_->msg_.velocity_error.resize(n);
-  }
-
   buffer_lambda1_ = getLambda1();
   buffer_lambda2_ = getLambda2();
   buffer_weight_diag_ = getWeightDiag();
@@ -129,45 +118,43 @@ void PosturalImpl::updateCost(const Eigen::VectorXd& x)
 
 void PosturalImpl::publish()
 {
-  if(!rt_pub_) return;
+  if(!pub_) return;
 
-  if(rt_pub_->trylock())
+  wolf_msgs::msg::PosturalTask msg;
+  msg.header.frame_id = "Joints";
+  msg.header.stamp = task_nh_->now();
+
+  const auto& names = jointNames();
+  const auto& q = actualQ();
+  const auto& qdot = actualQdot();
+  const auto& qref = refQ();
+  const auto& qdref = refQdotCached();
+  const auto& e = posError();
+  const auto& edot = velError();
+
+  const std::size_t n = static_cast<std::size_t>(q.size());
+
+  msg.name.resize(n);
+  msg.position_actual.resize(n);
+  msg.position_reference.resize(n);
+  msg.velocity_actual.resize(n);
+  msg.velocity_reference.resize(n);
+  msg.position_error.resize(n);
+  msg.velocity_error.resize(n);
+
+  for(std::size_t i = 0; i < n; ++i)
   {
-    rt_pub_->msg_.header.frame_id = "Joints";
-    rt_pub_->msg_.header.stamp = task_nh_->now();
-
-    const auto& names = jointNames();
-    const auto& q = actualQ();
-    const auto& qdot = actualQdot();
-    const auto& qref = refQ();
-    const auto& qdref = refQdotCached();
-    const auto& e = posError();
-    const auto& edot = velError();
-
-    const std::size_t n = static_cast<std::size_t>(q.size());
-
-    rt_pub_->msg_.name.resize(n);
-    rt_pub_->msg_.position_actual.resize(n);
-    rt_pub_->msg_.position_reference.resize(n);
-    rt_pub_->msg_.velocity_actual.resize(n);
-    rt_pub_->msg_.velocity_reference.resize(n);
-    rt_pub_->msg_.position_error.resize(n);
-    rt_pub_->msg_.velocity_error.resize(n);
-
-    for(std::size_t i = 0; i < n; ++i)
-    {
-      rt_pub_->msg_.name[i] = (i < names.size()) ? names[i] : std::string("");
-      rt_pub_->msg_.position_actual[i] = q(i);
-      rt_pub_->msg_.position_reference[i] = qref(i);
-      rt_pub_->msg_.velocity_actual[i] = qdot(i);
-      rt_pub_->msg_.velocity_reference[i] = (qdref.size() == qdot.size()) ? qdref(i) : 0.0;
-      rt_pub_->msg_.position_error[i] = e(i);
-      rt_pub_->msg_.velocity_error[i] = edot(i);
-    }
-
-    rt_pub_->msg_.cost = cost_;
-    rt_pub_->unlockAndPublish();
+    msg.name[i] = (i < names.size()) ? names[i] : std::string("");
+    msg.position_actual[i] = q(i);
+    msg.position_reference[i] = qref(i);
+    msg.velocity_actual[i] = qdot(i);
+    msg.velocity_reference[i] = (qdref.size() == qdot.size()) ? qdref(i) : 0.0;
+    msg.position_error[i] = e(i);
+    msg.velocity_error[i] = edot(i);
   }
+
+  msg.cost = cost_;
+  pub_->publish(std::move(msg));
 }
 
 bool PosturalImpl::reset()

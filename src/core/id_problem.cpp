@@ -113,6 +113,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     feet_[fn]->OPTIONS.set_ext_lambda = false;
     feet_[fn]->loadParams();
     feet_[fn]->registerReconfigurableVariables();
+    feet_[fn]->activateRuntimeInterfaces();
   }
 
   // Arms cartesian tasks (external references by default)
@@ -131,6 +132,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     arms_[ee]->OPTIONS.set_ext_reference = true;
     arms_[ee]->loadParams();
     arms_[ee]->registerReconfigurableVariables();
+    arms_[ee]->activateRuntimeInterfaces();
   }
 
   // Wrench (force tracking) tasks
@@ -144,6 +146,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     );
     wrenches_[fn]->loadParams();
     wrenches_[fn]->registerReconfigurableVariables();
+    wrenches_[fn]->activateRuntimeInterfaces();
   }
 
   // Angular momentum
@@ -159,6 +162,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   angular_momentum_->setMomentumGain(Eigen::Matrix3d::Identity());
   angular_momentum_->loadParams();
   angular_momentum_->registerReconfigurableVariables();
+  angular_momentum_->activateRuntimeInterfaces();
 
   // Waist cartesian task
   waist_ = std::make_shared<CartesianImpl>(
@@ -175,6 +179,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   waist_->setLambda(1., 1.);
   waist_->loadParams();
   waist_->registerReconfigurableVariables();
+  waist_->activateRuntimeInterfaces();
 
   // Postural
   postural_ = std::make_shared<PosturalImpl>(
@@ -187,6 +192,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   postural_->setLambda(1., 1.);
   postural_->loadParams();
   postural_->registerReconfigurableVariables();
+  postural_->activateRuntimeInterfaces();
   postural_->setReference(model_->getStandUpJointPostion());
 
   // CoM
@@ -200,6 +206,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   com_->setLambda(1., 1.);
   com_->loadParams();
   com_->registerReconfigurableVariables();
+  com_->activateRuntimeInterfaces();
 
   // -------------------- Constraints --------------------
   constraints_.clear();

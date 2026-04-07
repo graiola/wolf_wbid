@@ -74,6 +74,8 @@ public:
   virtual void loadParams() = 0;
   /** @brief Registers dynamic parameters, if any. */
   virtual void registerReconfigurableVariables() {}
+  /** @brief Starts async ROS interfaces once construction and parameter init are complete. */
+  virtual void activateRuntimeInterfaces() {}
   /** @brief Updates task cost diagnostics from the current solution. */
   virtual void updateCost(const Eigen::VectorXd& x) = 0;
 
