@@ -54,6 +54,8 @@ IF( NOT CMAKE_BUILD_TYPE )
         )
 ENDIF( NOT CMAKE_BUILD_TYPE )
 
+OPTION(QPOASES_BUILD_EXAMPLES "Build qpOASES example executables" OFF)
+
 
 ############################################################
 #################### compiler flags ########################
@@ -125,24 +127,26 @@ INSTALL(DIRECTORY include/qpOASES
 ############################################################
 ######################### examples #########################
 ############################################################
-# compile qpOASES examples
-SET(EXAMPLE_NAMES
-    example1
-    example1a
-    example1b
-    example2
-    example3
-    example3b
-    example4
-    example5
-    exampleLP
-    qrecipe
-)
+IF(QPOASES_BUILD_EXAMPLES)
+    # compile qpOASES examples
+    SET(EXAMPLE_NAMES
+        example1
+        example1a
+        example1b
+        example2
+        example3
+        example3b
+        example4
+        example5
+        exampleLP
+        qrecipe
+    )
 
-FOREACH(ELEMENT ${EXAMPLE_NAMES})
-    ADD_EXECUTABLE(${ELEMENT} examples/${ELEMENT}.cpp)
-    TARGET_LINK_LIBRARIES(${ELEMENT} qpOASES)
-ENDFOREACH(ELEMENT ${EXAMPLE_NAMES})
+    FOREACH(ELEMENT ${EXAMPLE_NAMES})
+        ADD_EXECUTABLE(${ELEMENT} examples/${ELEMENT}.cpp)
+        TARGET_LINK_LIBRARIES(${ELEMENT} qpOASES)
+    ENDFOREACH(ELEMENT ${EXAMPLE_NAMES})
+ENDIF(QPOASES_BUILD_EXAMPLES)
 
 
 ##
