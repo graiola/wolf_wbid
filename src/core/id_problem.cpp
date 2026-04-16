@@ -145,7 +145,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
       dt
     );
     wrenches_[fn]->loadParams();
-    wrenches_[fn]->registerReconfigurableVariables();
+    wrenches_[fn]->registerReconfigurableVariables(); // NOTE: it should be disabled because wrenches are used only by EXT
     wrenches_[fn]->activateRuntimeInterfaces();
   }
 
@@ -526,7 +526,12 @@ void IDProblem::update()
     if(control_mode_ == EXT) {
       for(size_t i = 0; i < foot_names_.size(); ++i) {
         const auto& fn = foot_names_[i];
-        if(i < contact_wrenches_.size()) wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
+        if(i < contact_wrenches_.size())
+        {
+          wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
+          wrenches_[fn]->setLambda1(20.0);
+          wrenches_[fn]->setWeight(2.0);
+        }
         feet_[fn]->setLambda(1., 1.);
         // Keep all contacts enabled in EXT (legacy behavior: no swing/stance gating from planner)
         contact_enabled_[fn] = true;
@@ -542,7 +547,12 @@ void IDProblem::update()
     } else { // WPG
       for(size_t i = 0; i < foot_names_.size(); ++i) {
         const auto& fn = foot_names_[i];
-        if(i < contact_wrenches_.size()) wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
+        if(i < contact_wrenches_.size())
+        {
+          wrenches_[fn]->setReference(contact_wrenches_[i].head<3>());
+          wrenches_[fn]->setLambda1(0.0);
+          wrenches_[fn]->setWeight(0.0);
+        }
         feet_[fn]->setBaseLink(WORLD_FRAME_NAME);
         feet_[fn]->setLambda(0., 0.);
       }
