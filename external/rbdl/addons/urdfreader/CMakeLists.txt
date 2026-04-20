@@ -16,6 +16,7 @@ SET ( URDFREADER_SOURCES
 	)
 
 SET (RBDL_USE_ROS_URDF_LIBRARY FALSE)
+SET (URDFREADER_COMPILE_DEFINITIONS "")
 
 IF (DEFINED ENV{ROS_ROOT})
 	MESSAGE (STATUS "ROS found: $ENV{ROS_ROOT}")
@@ -38,6 +39,7 @@ ELSE ()
 ENDIF ()
 
 IF (RBDL_USE_ROS_URDF_LIBRARY)
+	LIST(APPEND URDFREADER_COMPILE_DEFINITIONS RBDL_USE_ROS_URDF_LIBRARY)
 	SET (URDFREADER_DEPENDENCIES
 		rbdl
 		)
@@ -86,6 +88,7 @@ ADD_EXECUTABLE (rbdl_urdfreader_util rbdl_urdfreader_util.cc)
 
 IF (RBDL_BUILD_STATIC)
         ADD_LIBRARY ( rbdl_urdfreader-static STATIC ${URDFREADER_SOURCES} )
+        target_compile_definitions(rbdl_urdfreader-static PRIVATE ${URDFREADER_COMPILE_DEFINITIONS})
 
         SET_TARGET_PROPERTIES ( rbdl_urdfreader-static PROPERTIES PREFIX "lib")
         SET_TARGET_PROPERTIES ( rbdl_urdfreader-static PROPERTIES OUTPUT_NAME "rbdl_urdfreader")
@@ -106,6 +109,7 @@ IF (RBDL_BUILD_STATIC)
         )
 ELSE (RBDL_BUILD_STATIC)
         ADD_LIBRARY ( rbdl_urdfreader SHARED ${URDFREADER_SOURCES} )
+        target_compile_definitions(rbdl_urdfreader PRIVATE ${URDFREADER_COMPILE_DEFINITIONS})
         SET_TARGET_PROPERTIES ( rbdl_urdfreader PROPERTIES
                 VERSION ${RBDL_VERSION}
                 SOVERSION ${RBDL_SO_VERSION}
