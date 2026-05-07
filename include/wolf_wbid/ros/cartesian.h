@@ -16,7 +16,15 @@ WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 #include <std_srvs/Empty.h>
 #include <geometry_msgs/PoseArray.h>
 #include <tf2_ros/transform_listener.h>
-#include <tf2_eigen/tf2_eigen.h>
+#if __has_include(<tf2_eigen/tf2_eigen/tf2_eigen.hpp>)
+  #include <tf2_eigen/tf2_eigen/tf2_eigen.hpp>
+#elif __has_include(<tf2_eigen/tf2_eigen/tf2_eigen.h>)
+  #include <tf2_eigen/tf2_eigen/tf2_eigen.h>
+#elif __has_include(<tf2_eigen/tf2_eigen.hpp>)
+  #include <tf2_eigen/tf2_eigen.hpp>
+#else
+  #include <tf2_eigen/tf2_eigen.h>
+#endif
 
 // WoLF
 #include <wolf_wbid/core/task_interface.h>                 // <- brings wolf_wbid::Cartesian handle
