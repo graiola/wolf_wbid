@@ -899,7 +899,7 @@ bool QuadrupedRobotRBDL::getJacobian(const std::string& link_name, const std::st
 
 double QuadrupedRobotRBDL::getCurrentHeight() { return current_height_; }
 
-int QuadrupedRobotRBDL::getJointNum() const { return static_cast<int>(q_.size()); }
+int QuadrupedRobotRBDL::getJointNum() const { return static_cast<int>(qdot_.size()); }
 double QuadrupedRobotRBDL::getMass() const
 {
   double mass = 0.0;
