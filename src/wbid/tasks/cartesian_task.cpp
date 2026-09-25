@@ -241,8 +241,19 @@ void CartesianTask::update()
         + Mi * f_virtual;
   }
 
+  for(int k=0; k<6; ++k) {
+    if(!std::isfinite(y(k)) || std::abs(y(k)) > 30.0) {
+      y(k) = std::clamp(y(k), -30.0, 30.0);
+    }
+  }
+
   // Final constraint: J*qddot = y - Jdot*qdot
   b_ = y - jdotqdot;
+  for(int k = 0; k < 6; ++k) {
+    if(!std::isfinite(b_(k)) || std::abs(b_(k)) > 30.0) {
+      b_(k) = std::clamp(b_(k), -30.0, 30.0);
+    }
+  }
 }
 
 bool CartesianTask::reset()

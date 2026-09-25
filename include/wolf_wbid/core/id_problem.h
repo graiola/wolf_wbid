@@ -242,8 +242,8 @@ private:
 
   // weights
   double regularization_value_{1e-3};
-  double min_forces_weight_{0.0};
-  double min_qddot_weight_{0.0};
+  double min_forces_weight_{1e-3};
+  double min_qddot_weight_{0.1};
 
   // names
   std::vector<std::string> foot_names_;

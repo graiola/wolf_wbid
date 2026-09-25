@@ -334,6 +334,16 @@ bool QuadrupedRobotRBDL::update(bool update_position, bool update_velocity, bool
   (void)update_velocity;
   (void)update_desired_acceleration;
 
+  for(int k = 0; k < q_.size(); ++k) {
+    if(!std::isfinite(q_(k))) q_(k) = 0.0;
+  }
+  for(int k = 0; k < qdot_.size(); ++k) {
+    if(!std::isfinite(qdot_(k))) qdot_(k) = 0.0;
+  }
+  for(int k = 0; k < qddot_.size(); ++k) {
+    if(!std::isfinite(qddot_(k))) qddot_(k) = 0.0;
+  }
+
   RigidBodyDynamics::UpdateKinematics(rbdl_model_, q_, qdot_, qddot_);
 
   // Update base transform
@@ -524,8 +534,17 @@ void QuadrupedRobotRBDL::getCOMJacobian(Eigen::MatrixXd& Jcom) const
     mass += body.mMass;
   }
 
-  tmp_jacobian_ /= mass;
+  if(mass > 1e-4) {
+    tmp_jacobian_ /= mass;
+  }
   Jcom = tmp_jacobian_.topRows(3);
+  for(int r = 0; r < Jcom.rows(); ++r) {
+    for(int c = 0; c < Jcom.cols(); ++c) {
+      if(!std::isfinite(Jcom(r,c)) || std::abs(Jcom(r,c)) > 5.0) {
+        Jcom(r,c) = std::clamp(Jcom(r,c), -5.0, 5.0);
+      }
+    }
+  }
 }
 
 void QuadrupedRobotRBDL::getCentroidalMomentum(Eigen::Vector6d& h) const
@@ -564,9 +583,28 @@ void QuadrupedRobotRBDL::getCentroidalMomentumMatrix(Eigen::MatrixXd& CMM, Eigen
   getJacobian(base_name_, fb_com, Jfb);
 
   Eigen::Matrix<double, 6, 6> Ju = Jfb.block<6,6>(0,0);
-  Eigen::Matrix<double, 6, 6> Ju_T_inv = Ju.transpose().inverse();
+  Eigen::Matrix<double, 6, 6> Ju_T_inv;
+  if (std::abs(Ju.determinant()) < 1e-4) {
+    Ju_T_inv = Ju.transpose().completeOrthogonalDecomposition().pseudoInverse();
+  } else {
+    Ju_T_inv = Ju.transpose().inverse();
+  }
+  for(int r = 0; r < 6; ++r) {
+    for(int c = 0; c < 6; ++c) {
+      if(!std::isfinite(Ju_T_inv(r,c)) || std::abs(Ju_T_inv(r,c)) > 10.0) {
+        Ju_T_inv(r,c) = std::clamp(Ju_T_inv(r,c), -10.0, 10.0);
+      }
+    }
+  }
 
   CMM.noalias() = Ju_T_inv * tmp_M_.block(0,0,6,getJointNum());
+  for(int r = 0; r < CMM.rows(); ++r) {
+    for(int c = 0; c < CMM.cols(); ++c) {
+      if(!std::isfinite(CMM(r,c)) || std::abs(CMM(r,c)) > 50.0) {
+        CMM(r,c) = std::clamp(CMM(r,c), -50.0, 50.0);
+      }
+    }
+  }
 
   Eigen::VectorXd h;
   Eigen::VectorXd gcomp;
@@ -629,6 +667,9 @@ bool QuadrupedRobotRBDL::computeJdotQdot(const std::string& link, const Eigen::V
   Eigen::Vector6d acc = RigidBodyDynamics::CalcPointAcceleration6D(rbdl_model_, q_, qdot_, tmp_qdd_zero_, body_id, p, true);
   jdotqdot.head<3>() = acc.tail<3>();
   jdotqdot.tail<3>() = acc.head<3>();
+  for(int k = 0; k < 6; ++k) {
+    if(!std::isfinite(jdotqdot(k))) jdotqdot(k) = 0.0;
+  }
   return true;
 }
 
@@ -921,10 +962,54 @@ bool QuadrupedRobotRBDL::getJointEffort(Eigen::VectorXd& tau) const { tau = tau_
 const Eigen::VectorXd& QuadrupedRobotRBDL::getJointPositions() const { return q_; }
 const Eigen::VectorXd& QuadrupedRobotRBDL::getJointVelocities() const { return qdot_; }
 const Eigen::VectorXd& QuadrupedRobotRBDL::getJointEfforts() const { return tau_; }
-bool QuadrupedRobotRBDL::setJointPosition(const Eigen::VectorXd& q) { q_ = q; return true; }
-bool QuadrupedRobotRBDL::setJointVelocity(const Eigen::VectorXd& qd) { qdot_ = qd; return true; }
-bool QuadrupedRobotRBDL::setJointEffort(const Eigen::VectorXd& tau) { tau_ = tau; return true; }
-bool QuadrupedRobotRBDL::setJointAcceleration(const Eigen::VectorXd& qddot) { qddot_ = qddot; return true; }
+bool QuadrupedRobotRBDL::setJointPosition(const Eigen::VectorXd& q)
+{
+  if(q.size() == q_.size()) {
+    q_ = q;
+  } else if(q.size() == q_.size() - FLOATING_BASE_DOFS) {
+    q_.tail(q.size()) = q;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool QuadrupedRobotRBDL::setJointVelocity(const Eigen::VectorXd& qd)
+{
+  if(qd.size() == qdot_.size()) {
+    qdot_ = qd;
+  } else if(qd.size() == qdot_.size() - FLOATING_BASE_DOFS) {
+    qdot_.tail(qd.size()) = qd;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool QuadrupedRobotRBDL::setJointEffort(const Eigen::VectorXd& tau)
+{
+  if(tau.size() == tau_.size()) {
+    tau_ = tau;
+  } else if(tau.size() == tau_.size() - FLOATING_BASE_DOFS) {
+    tau_.tail(tau.size()) = tau;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool QuadrupedRobotRBDL::setJointAcceleration(const Eigen::VectorXd& qddot)
+{
+  if(qddot.size() == qddot_.size()) {
+    qddot_ = qddot;
+  } else if(qddot.size() == qddot_.size() - FLOATING_BASE_DOFS) {
+    qddot_.tail(qddot.size()) = qddot;
+  } else {
+    return false;
+  }
+  return true;
+}
+
 bool QuadrupedRobotRBDL::setJointPosition(int i, double q) { if(i<0||i>=q_.size()) return false; q_(i)=q; return true; }
 bool QuadrupedRobotRBDL::setJointVelocity(int i, double qd) { if(i<0||i>=qdot_.size()) return false; qdot_(i)=qd; return true; }
 bool QuadrupedRobotRBDL::setJointEffort(int i, double tau) { if(i<0||i>=tau_.size()) return false; tau_(i)=tau; return true; }
@@ -936,7 +1021,8 @@ bool QuadrupedRobotRBDL::getFloatingBasePose(Eigen::Affine3d& pose) const
 
 bool QuadrupedRobotRBDL::setFloatingBasePose(const Eigen::Affine3d& pose)
 {
-  Eigen::Vector3d rpy = pose.linear().eulerAngles(0,1,2);
+  Eigen::Vector3d rpy;
+  wolf_controller_utils::rotToRpy(pose.linear(), rpy);
   if(q_.size() < FLOATING_BASE_DOFS) return false;
   q_.segment<3>(0) = pose.translation() - fb_origin_offset_;
   q_.segment<3>(3) = rpy;
@@ -945,7 +1031,8 @@ bool QuadrupedRobotRBDL::setFloatingBasePose(const Eigen::Affine3d& pose)
 
 bool QuadrupedRobotRBDL::setFloatingBaseOrientation(const Eigen::Matrix3d& world_R_base)
 {
-  Eigen::Vector3d rpy = world_R_base.eulerAngles(0,1,2);
+  Eigen::Vector3d rpy;
+  wolf_controller_utils::rotToRpy(world_R_base, rpy);
   if(q_.size() < FLOATING_BASE_DOFS) return false;
   q_.segment<3>(3) = rpy;
   return true;
@@ -961,7 +1048,17 @@ bool QuadrupedRobotRBDL::setFloatingBaseAngularVelocity(const Eigen::Vector3d& w
   Eigen::MatrixXd Jfb(6, rbdl_model_.dof_count);
   RigidBodyDynamics::CalcPointJacobian6D(rbdl_model_, q_, floating_base_link_id_, Eigen::Vector3d::Zero(), Jfb, true);
   Eigen::Matrix3d Tphi = Jfb.block<3,3>(0,3);
-  qdot_.segment<3>(3) = Tphi.colPivHouseholderQr().solve(w);
+  if(std::abs(Tphi.determinant()) < 1e-4) {
+    qdot_.segment<3>(3) = w;
+  } else {
+    Eigen::Vector3d rpy_dot = Tphi.colPivHouseholderQr().solve(w);
+    for(int k=0; k<3; ++k) {
+      if(!std::isfinite(rpy_dot(k)) || std::abs(rpy_dot(k)) > 20.0) {
+        rpy_dot(k) = std::clamp(rpy_dot(k), -20.0, 20.0);
+      }
+    }
+    qdot_.segment<3>(3) = rpy_dot;
+  }
   return true;
 }
 
@@ -969,7 +1066,11 @@ bool QuadrupedRobotRBDL::setFloatingBaseState(const Eigen::Affine3d& pose, const
 {
   if(!setFloatingBasePose(pose)) return false;
   if(qdot_.size() < FLOATING_BASE_DOFS) return false;
-  qdot_.segment<3>(0) = twist.head<3>();
+  for(int k=0; k<3; ++k) {
+    double vk = twist(k);
+    if(!std::isfinite(vk) || std::abs(vk) > 20.0) vk = std::clamp(vk, -20.0, 20.0);
+    qdot_(k) = vk;
+  }
   if(floating_base_link_id_ <= 0) {
     qdot_.segment<3>(3) = twist.tail<3>();
     return true;
@@ -977,7 +1078,17 @@ bool QuadrupedRobotRBDL::setFloatingBaseState(const Eigen::Affine3d& pose, const
   Eigen::MatrixXd Jfb(6, rbdl_model_.dof_count);
   RigidBodyDynamics::CalcPointJacobian6D(rbdl_model_, q_, floating_base_link_id_, Eigen::Vector3d::Zero(), Jfb, true);
   Eigen::Matrix3d Tphi = Jfb.block<3,3>(0,3);
-  qdot_.segment<3>(3) = Tphi.colPivHouseholderQr().solve(twist.tail<3>());
+  if(std::abs(Tphi.determinant()) < 1e-4) {
+    qdot_.segment<3>(3) = twist.tail<3>();
+  } else {
+    Eigen::Vector3d rpy_dot = Tphi.colPivHouseholderQr().solve(twist.tail<3>());
+    for(int k=0; k<3; ++k) {
+      if(!std::isfinite(rpy_dot(k)) || std::abs(rpy_dot(k)) > 20.0) {
+        rpy_dot(k) = std::clamp(rpy_dot(k), -20.0, 20.0);
+      }
+    }
+    qdot_.segment<3>(3) = rpy_dot;
+  }
   return true;
 }
 

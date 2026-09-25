@@ -235,8 +235,8 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
   {
     Eigen::VectorXd tau_max;
     model_->getEffortLimits(tau_max);
-    if(tau_max.size() >= FLOATING_BASE_DOFS) tau_max.head(FLOATING_BASE_DOFS).setZero();
-    tau_max = 0.9 * tau_max;
+    tau_max = 1.0 * tau_max;
+    if(tau_max.size() >= FLOATING_BASE_DOFS) tau_max.head(FLOATING_BASE_DOFS).setConstant(kBig());
 
     torque_limits_ = std::make_shared<TorqueLimitsConstraint>(
       "torque_limits",
@@ -248,13 +248,14 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     constraints_.push_back(torque_limits_);
   }
 
-  // Dynamics equality (EXT only)
+  // Dynamics equality (WPG + EXT)
   dynamics_eq_ = std::make_shared<DynamicsEqualityConstraint>(
     "dynamics",
     *model_,
     *vars_,
     foot_names_
   );
+  constraints_.push_back(dynamics_eq_);
   constraints_ext_.push_back(dynamics_eq_);
 
   // Optional constraints left disabled by default:
@@ -441,7 +442,7 @@ void IDProblem::setWaistReference(const Eigen::Matrix3d& Rot,
                                   const double& z_vel)
 {
   tmp_vector6d_.setZero();
-  tmp_affine3d_.setIdentity();
+  model_->getFloatingBasePose(tmp_affine3d_);
   tmp_affine3d_.linear() = Rot;
   tmp_affine3d_.translation().z() = z;
   tmp_vector6d_(2) = z_vel;
@@ -788,7 +789,11 @@ bool IDProblem::buildQP(QPProblem& qp)
 bool IDProblem::solveQP(IQPSolver& solver, const QPProblem& qp, Eigen::VectorXd& x)
 {
   const QPSolution sol = solver.solve(qp);
-  if(!sol.success) return false;
+  if(!sol.success) {
+    fprintf(stderr, "[WolfController] IDProblem::solveQP ERROR status: %s\n", sol.status.c_str());
+    std::cerr << "[IDProblem::solveQP] ERROR status: " << sol.status << std::endl;
+    return false;
+  }
 
   if(sol.x.size() != qp.n())
     throw std::runtime_error("IDProblem::solveQP(): solver returned wrong x size");
@@ -804,29 +809,44 @@ bool IDProblem::computeTauFromSolution(const Eigen::VectorXd& x, Eigen::VectorXd
 
 bool IDProblem::solve(Eigen::VectorXd& tau)
 {
-  if(!initialized_) return false;
+  if(!initialized_) {
+    fprintf(stderr, "[WolfController] IDProblem::solve ERROR: problem not initialized!\n");
+    std::cerr << "[IDProblem::solve] ERROR: problem not initialized!" << std::endl;
+    return false;
+  }
 
   update();
 
   const bool qp_built = buildQP(qp_);
   if(!qp_built) {
+    fprintf(stderr, "[WolfController] IDProblem::solve ERROR: buildQP failed!\n");
+    std::cerr << "[IDProblem::solve] ERROR: buildQP failed!" << std::endl;
     debugDumpSolveStep(&qp_, nullptr, nullptr, false, false, false);
     return false;
   }
 
   if(!solver_) {
+    fprintf(stderr, "[WolfController] IDProblem::solve ERROR: solver_ is null!\n");
+    std::cerr << "[IDProblem::solve] ERROR: solver_ is null!" << std::endl;
     debugDumpSolveStep(&qp_, nullptr, nullptr, true, false, false);
     return false;
   }
 
   const bool qp_solved = solveQP(*solver_, qp_, x_);
   if(!qp_solved) {
+    fprintf(stderr, "[WolfController] IDProblem::solve ERROR: solveQP failed! n=%d m=%d\n", qp_.n(), qp_.m());
+    std::cerr << "[IDProblem::solve] ERROR: solveQP failed! n=" << qp_.n() << " m=" << qp_.m() << std::endl;
     debugDumpSolveStep(&qp_, &x_, nullptr, true, false, false);
     return false;
   }
 
   const bool torque_ok = computeTauFromSolution(x_, tau);
-  debugDumpSolveStep(&qp_, &x_, &tau, true, true, torque_ok);
+  if(!torque_ok) {
+    fprintf(stderr, "[WolfController] IDProblem::solve ERROR: computeTauFromSolution failed!\n");
+    std::cerr << "[IDProblem::solve] ERROR: computeTauFromSolution failed!" << std::endl;
+    const_cast<IDProblem*>(this)->debug_enabled_ = true;
+    debugDumpSolveStep(&qp_, &x_, &tau, true, true, torque_ok);
+  }
 
   return torque_ok;
 }

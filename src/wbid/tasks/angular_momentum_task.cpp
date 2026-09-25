@@ -102,8 +102,20 @@ void AngularMomentumTask::update()
 
   A_.setZero();
   A_.block(0, qb_.offset, 3, qb_.dim) = Mom_.bottomRows(3);
+  for(int r = 0; r < A_.rows(); ++r) {
+    for(int c = 0; c < A_.cols(); ++c) {
+      if(!std::isfinite(A_(r,c)) || std::abs(A_(r,c)) > 100.0) {
+        A_(r,c) = std::clamp(A_(r,c), -100.0, 100.0);
+      }
+    }
+  }
 
   b_ = Ldot_ref_ - Ldot_bias_;
+  for(int k = 0; k < 3; ++k) {
+    if(!std::isfinite(b_(k)) || std::abs(b_(k)) > 20.0) {
+      b_(k) = std::clamp(b_(k), -20.0, 20.0);
+    }
+  }
 
   // 6) One-shot feedforward reset (OpenSoT behavior)
   L_d_.setZero();

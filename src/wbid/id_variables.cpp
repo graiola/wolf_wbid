@@ -88,7 +88,10 @@ bool IDVariables::computeTorque(QuadrupedRobot& model,
                                Eigen::VectorXd& qddot_out,
                                std::vector<Eigen::Vector6d>& contact_wrenches_out) const
 {
-  if(x.size() != size_) return false;
+  if(x.size() != size_) {
+    std::cerr << "[IDVariables::computeTorque] ERROR: size mismatch x.size()=" << x.size() << " size_=" << size_ << std::endl;
+    return false;
+  }
 
   qddot_out = qddot(x);
 
@@ -100,6 +103,14 @@ bool IDVariables::computeTorque(QuadrupedRobot& model,
     tau_out.resize(ndofs);
   }
   model.computeInverseDynamics(tau_out); // assumes no contact forces inside model ID
+
+  if(model.isFloatingBase()){
+    for(int i=0; i<6 && i<tau_out.size(); ++i){
+      if(std::abs(tau_out[i]) > 1e4){
+        fprintf(stderr, "[WolfController] IDVariables::computeTorque RNEA tau_out[%d]=%f (before contacts)\n", i, tau_out[i]);
+      }
+    }
+  }
 
   if(J_tmp_.rows() != 6 || J_tmp_.cols() != ndofs) {
     J_tmp_.resize(6, ndofs);
@@ -117,7 +128,15 @@ bool IDVariables::computeTorque(QuadrupedRobot& model,
 
   if(model.isFloatingBase()){
     for(int i=0; i<6 && i<tau_out.size(); ++i){
-      if(std::abs(tau_out[i]) > 1e-2){
+      if(std::abs(tau_out[i]) > 30.0){
+        fprintf(stderr, "[WolfController] IDVariables::computeTorque ERROR: floating base residual tau_out[%d]=%f exceeds threshold!\n", i, tau_out[i]);
+        fprintf(stderr, "[WolfController] qddot_out: ");
+        for(int k=0; k<qddot_out.size(); ++k) fprintf(stderr, "%f ", qddot_out[k]);
+        fprintf(stderr, "\n");
+        for(size_t c=0; c<contacts_.size(); ++c) {
+          fprintf(stderr, "[WolfController] foot[%zu] force: %f %f %f\n", c, contact_wrenches_out[c](0), contact_wrenches_out[c](1), contact_wrenches_out[c](2));
+        }
+        std::cerr << "[IDVariables::computeTorque] ERROR: floating base residual tau_out[" << i << "]=" << tau_out[i] << " exceeds threshold!" << std::endl;
         return false;
       }
     }

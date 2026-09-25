@@ -22,11 +22,11 @@ inline bool isSuccess(qpOASES::returnValue val)
 
 QPOasesSolver::QPOasesSolver()
 {
-  base_options_.setToMPC();
+  base_options_.setToReliable();
   base_options_.printLevel = qpOASES::PL_NONE;
   base_options_.enableRegularisation = qpOASES::BT_FALSE;
   base_options_.numRegularisationSteps = 0;
-  base_options_.numRefinementSteps = 1;
+  base_options_.numRefinementSteps = 2;
 
   options_ = base_options_;
   options_.epsRegularisation *= BASE_REGULARISATION;

@@ -33,33 +33,14 @@ void EiQuadProgSolver::setEpsRegularisation(double eps)
   }
 }
 
-static void appendCI(const Eigen::MatrixXd& CI_add, const Eigen::VectorXd& ci0_add,
-                     Eigen::MatrixXd& CI, Eigen::VectorXd& ci0)
+static void appendCol(Eigen::MatrixXd& M, Eigen::VectorXd& v, const Eigen::VectorXd& col, double val)
 {
-  // CI is (n x m), ci0 is (m)
-  const int n = static_cast<int>(CI_add.rows());
-  const int madd = static_cast<int>(CI_add.cols());
-  const int mold = static_cast<int>(ci0.size());
-
-  if(CI.size() == 0){
-    CI = CI_add;
-    ci0 = ci0_add;
-    return;
-  }
-
-  if(CI.rows() != n) throw std::runtime_error("EiQuadProgSolver: CI row mismatch");
-
-  Eigen::MatrixXd CI_new(n, mold + madd);
-  Eigen::VectorXd ci0_new(mold + madd);
-
-  CI_new.leftCols(mold) = CI;
-  CI_new.rightCols(madd) = CI_add;
-
-  ci0_new.head(mold) = ci0;
-  ci0_new.tail(madd) = ci0_add;
-
-  CI.swap(CI_new);
-  ci0.swap(ci0_new);
+  const int n = static_cast<int>(col.size());
+  const int mold = static_cast<int>(v.size());
+  M.conservativeResize(n, mold + 1);
+  M.col(mold) = col;
+  v.conservativeResize(mold + 1);
+  v(mold) = val;
 }
 
 QPSolution EiQuadProgSolver::solve(const QPProblem& qp)
@@ -91,35 +72,65 @@ QPSolution EiQuadProgSolver::solve(const QPProblem& qp)
     H.diagonal().array() += eps_reg_;
   }
 
-  // No equalities for now
-  Eigen::MatrixXd CE; CE.resize(n, 0);
-  Eigen::VectorXd ce0; ce0.resize(0);
+  constexpr double kUnbounded = 1.0e19;
+  constexpr double kEqTol = 1.0e-8;
 
-  // Build inequalities CI^T x + ci0 >= 0
-  // We'll build CI as (n x m_ineq)
-  Eigen::MatrixXd CI; CI.resize(n, 0);
-  Eigen::VectorXd ci0; ci0.resize(0);
+  Eigen::MatrixXd CE(n, 0);
+  Eigen::VectorXd ce0(0);
+
+  Eigen::MatrixXd CI(n, 0);
+  Eigen::VectorXd ci0(0);
 
   // 1) Bounds l <= x <= u
   if(qp.l.size() == n && qp.u.size() == n){
-    const Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
+    for(int i = 0; i < n; ++i){
+      const double li = qp.l(i);
+      const double ui = qp.u(i);
 
-    // I^T x + (-l) >= 0  -> x >= l
-    appendCI(I, -qp.l, CI, ci0);
-
-    // (-I)^T x + (u) >= 0 -> -x >= -u -> x <= u
-    appendCI(-I, qp.u, CI, ci0);
+      if(li > -kUnbounded && ui < kUnbounded && std::abs(ui - li) < kEqTol){
+        // Equality x(i) = li => e_i^T x - li = 0
+        Eigen::VectorXd e = Eigen::VectorXd::Zero(n);
+        e(i) = 1.0;
+        appendCol(CE, ce0, e, -li);
+      } else {
+        if(li > -kUnbounded){
+          // x(i) >= li => e_i^T x - li >= 0
+          Eigen::VectorXd e = Eigen::VectorXd::Zero(n);
+          e(i) = 1.0;
+          appendCol(CI, ci0, e, -li);
+        }
+        if(ui < kUnbounded){
+          // x(i) <= ui => -e_i^T x + ui >= 0
+          Eigen::VectorXd e = Eigen::VectorXd::Zero(n);
+          e(i) = -1.0;
+          appendCol(CI, ci0, e, ui);
+        }
+      }
+    }
   } else if(qp.l.size() != 0 || qp.u.size() != 0){
     throw std::runtime_error("EiQuadProgSolver: bounds must be either both size n or both empty");
   }
 
   // 2) Linear constraints lA <= A x <= uA
   if(qp.A.rows() > 0){
-    // A x >= lA  -> (A^T)x + (-lA) >= 0
-    appendCI(qp.A.transpose(), -qp.lA, CI, ci0);
+    for(int i = 0; i < qp.A.rows(); ++i){
+      const double lAi = qp.lA(i);
+      const double uAi = qp.uA(i);
 
-    // A x <= uA  -> (-A)x >= -uA -> (-A^T)x + (uA) >= 0
-    appendCI(-qp.A.transpose(), qp.uA, CI, ci0);
+      if(lAi > -kUnbounded && uAi < kUnbounded && std::abs(uAi - lAi) < kEqTol){
+        // Equality A.row(i) x - lAi = 0
+        appendCol(CE, ce0, qp.A.row(i).transpose(), -lAi);
+      } else {
+        if(lAi > -kUnbounded){
+          // A.row(i) x >= lAi => A.row(i) x - lAi >= 0
+          appendCol(CI, ci0, qp.A.row(i).transpose(), -lAi);
+        }
+        if(uAi < kUnbounded){
+          // A.row(i) x <= uAi => -A.row(i) x + uAi >= 0
+          appendCol(CI, ci0, -qp.A.row(i).transpose(), uAi);
+        }
+      }
+    }
   }
 
   sol.x.setZero(n);

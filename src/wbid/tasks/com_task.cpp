@@ -79,11 +79,21 @@ void ComTask::update()
     throw std::runtime_error("ComTask::update(): Kp/Kd must be 3x3");
 
   Eigen::Vector3d pdd_des = getKp() * e_p_ + getKd() * e_v_;
+  for(int k=0; k<3; ++k) {
+    if(!std::isfinite(pdd_des(k)) || std::abs(pdd_des(k)) > 15.0) {
+      pdd_des(k) = std::clamp(pdd_des(k), -15.0, 15.0);
+    }
+  }
 
   Eigen::Vector3d Jdot_qd;
   getCOMJacobianDotTimesQdot(Jdot_qd);
 
   b_ = pdd_des - Jdot_qd;
+  for(int k = 0; k < 3; ++k) {
+    if(!std::isfinite(b_(k)) || std::abs(b_(k)) > 20.0) {
+      b_(k) = std::clamp(b_(k), -20.0, 20.0);
+    }
+  }
 }
 
 bool ComTask::reset()
