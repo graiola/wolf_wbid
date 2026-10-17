@@ -414,7 +414,11 @@ const double& QuadrupedRobotRBDL::getBaseWidth() const { return base_width_; }
 
 bool QuadrupedRobotRBDL::isRobotFalling(const double& dt) const
 {
-  return (((current_height_ - previous_height_) / dt <= EPS) ? false : true);
+  if (dt <= 0.0) return false;
+  double vel_z = (current_height_ - previous_height_) / dt;
+  // Falling if moving down with significant velocity
+  if (vel_z < -0.01) return true;
+  return false;
 }
 
 void QuadrupedRobotRBDL::getFloatingBasePositionInertia(Eigen::Matrix3d& M)
