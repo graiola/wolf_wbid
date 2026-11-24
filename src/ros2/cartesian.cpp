@@ -7,6 +7,7 @@
 
 // WoLF
 #include <wolf_wbid/ros2/cartesian.h>
+#include <wolf_wbid/core/reference_validation.h>
 #include <wolf_wbid/core/quadruped_robot.h>
 #include <wolf_wbid/wbid/id_variables.h>
 #include <wolf_controller_utils/converters.h>
@@ -60,9 +61,8 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
 
   // Initialize buffers
   tmp_affine3d_.setIdentity();
-  buffer_reference_pose_.initRT(tmp_affine3d_);
   tmp_vector6d_.setZero();
-  buffer_reference_twist_.initRT(tmp_vector6d_);
+  reference_buffer_.initRT(CartesianReference{tmp_affine3d_, tmp_vector6d_, getBaseLink()});
 
   // Create the marker
   control_type_ = visualization_msgs::msg::InteractiveMarkerControl::MOVE_ROTATE_3D;
@@ -78,7 +78,7 @@ CartesianImpl::CartesianImpl(const std::string& robot_name,
 
   // Create the reference subscriber
   reference_sub_ = task_nh_->create_subscription<wolf_msgs::msg::Cartesian>(
-      "reference/" + task_id, 1000, std::bind(&CartesianImpl::referenceCallback, this, std::placeholders::_1));
+      "reference/" + task_id, 1, std::bind(&CartesianImpl::referenceCallback, this, std::placeholders::_1));
 }
 
 void CartesianImpl::registerReconfigurableVariables()
@@ -268,9 +268,17 @@ void CartesianImpl::applyExternalReference()
 {
   if(OPTIONS.set_ext_reference)
   {
-    if(is_continuous_)
+    if(OPTIONS.mpc_reference_mode || is_continuous_)
     {
-      setReference(*buffer_reference_pose_.readFromRT(),*buffer_reference_twist_.readFromRT());
+      const auto* reference = reference_buffer_.readFromRT();
+      if (reference->generation != externalReferenceGeneration())
+        return;
+      if (OPTIONS.mpc_reference_mode && reference->frame != WORLD_FRAME_NAME)
+        return;
+      if (!reference->frame.empty() && reference->frame != getBaseLink() &&
+          !setBaseLink(reference->frame))
+        return;
+      setReference(reference->pose, reference->twist);
     }
     else
     {
@@ -328,9 +336,10 @@ bool CartesianImpl::reset()
   publishWP(waypoints_);
   trj_->reset();
   getActualPose(tmp_affine3d_);
-  buffer_reference_pose_.initRT(tmp_affine3d_);
   tmp_vector6d_.setZero();
-  buffer_reference_twist_.initRT(tmp_vector6d_);
+  if (!OPTIONS.mpc_reference_mode) {
+    invalidateExternalReference();
+  }
 
   // Keep marker aligned with current reference
   getReference(tmp_affine3d_);
@@ -560,6 +569,7 @@ void CartesianImpl::makeMenu()
 
 void CartesianImpl::processFeedback(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr& feedback)
 {
+  if (OPTIONS.mpc_reference_mode) return;
   RCLCPP_DEBUG_STREAM(rclcpp::get_logger("cartesian_impl"), feedback->marker_name << " is now at "
                         << feedback->pose.position.x << ", " << feedback->pose.position.y
                         << ", " << feedback->pose.position.z << " frame " << feedback->header.frame_id);
@@ -570,8 +580,9 @@ void CartesianImpl::processFeedback(const visualization_msgs::msg::InteractiveMa
 
   if (is_continuous_)
   {
-    buffer_reference_pose_.writeFromNonRT(pose_reference);
-    buffer_reference_twist_.writeFromNonRT(twist_reference);
+    invalidateExternalReference();
+    reference_buffer_.writeFromNonRT(CartesianReference{
+        pose_reference, twist_reference, feedback->header.frame_id, externalReferenceGeneration()});
   }
 }
 
@@ -603,23 +614,34 @@ Eigen::Affine3d CartesianImpl::getPose(const std::string& base_link, const std::
 
 void CartesianImpl::referenceCallback(const wolf_msgs::msg::Cartesian::SharedPtr msg)
 {
-  double period = period_;
-
-  if (last_time_ != 0.0)
-    period = (msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9) - last_time_;
-
-  Eigen::Affine3d pose_reference = Eigen::Affine3d::Identity();
-  Eigen::Vector6d twist_reference = Eigen::Vector6d::Zero();
-  pose_reference = wolf_controller_utils::poseToAffine3d(msg->pose);
-  twist_reference = wolf_controller_utils::twistToVector6d(msg->twist);
-
-  if (!msg->header.frame_id.empty() && msg->header.frame_id != getBaseLink() && OPTIONS.set_ext_reference)
-    setBaseLink(msg->header.frame_id);
-
-  buffer_reference_pose_.writeFromNonRT(pose_reference);
-  buffer_reference_twist_.writeFromNonRT(twist_reference);
-
-  last_time_ = (msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9);
+  const auto generation = externalReferenceGeneration();
+  const Eigen::Vector3d position(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
+  Eigen::Quaterniond orientation(msg->pose.orientation.w, msg->pose.orientation.x,
+                                msg->pose.orientation.y, msg->pose.orientation.z);
+  const Eigen::Vector6d twist = wolf_controller_utils::twistToVector6d(msg->twist);
+  const auto& frame = msg->header.frame_id;
+  const bool known_frame = frame.empty() || frame == WORLD_FRAME_NAME || urdf_.getLink(frame);
+  if (!validCartesianReference(position, orientation, twist) || !known_frame ||
+      (OPTIONS.mpc_reference_mode && frame != WORLD_FRAME_NAME)) {
+    RCLCPP_WARN_THROTTLE(task_nh_->get_logger(), *task_nh_->get_clock(), 2000,
+                        "Rejected invalid Cartesian reference or unsupported MPC frame");
+    return;
+  }
+  orientation.normalize();
+  CartesianReference reference;
+  reference.pose.translation() = position;
+  reference.pose.linear() = orientation.toRotationMatrix();
+  reference.twist = twist;
+  reference.frame = frame;
+  reference.generation = generation;
+  if (frame != WORLD_FRAME_NAME) {
+    invalidateExternalReference();
+    reference.generation = externalReferenceGeneration();
+  }
+  reference_buffer_.writeFromNonRT(reference);
+  if (frame == WORLD_FRAME_NAME)
+    markExternalReferenceReceived(reference.generation);
+  last_time_ = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
 }
 
 void CartesianImpl::sendWayPoints(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr& /*feedback*/)
@@ -749,6 +771,7 @@ bool CartesianImpl::spawnMarker()
 
 void CartesianImpl::setContinuousCtrl(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr& /*feedback*/)
 {
+  if (OPTIONS.mpc_reference_mode) return;
   is_continuous_ = !is_continuous_; // Toggle continuous control
 
   if (!is_continuous_) {
@@ -767,8 +790,8 @@ void CartesianImpl::setContinuousCtrl(const visualization_msgs::msg::Interactive
     Eigen::Affine3d pose;
     Eigen::Vector6d twist = Eigen::Vector6d::Zero();
     getActualPose(pose);
-    buffer_reference_pose_.writeFromNonRT(pose);
-    buffer_reference_twist_.writeFromNonRT(twist);
+    invalidateExternalReference();
+    reference_buffer_.writeFromNonRT(CartesianReference{pose, twist, getBaseLink(), externalReferenceGeneration()});
   }
 
   clearMarker(); // Clear marker
@@ -781,6 +804,7 @@ void CartesianImpl::setContinuousCtrl(const visualization_msgs::msg::Interactive
 
 void CartesianImpl::changeBaseLink(const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr& feedback, std::string new_base_link)
 {
+  if (OPTIONS.mpc_reference_mode) return;
   int entry_id = feedback->menu_entry_id;
 
   // Get the title for the entry from the menu handler
@@ -795,10 +819,9 @@ void CartesianImpl::changeBaseLink(const visualization_msgs::msg::InteractiveMar
   {
     Eigen::Affine3d pose_ref;
     getReference(pose_ref);
-    buffer_reference_pose_.writeFromNonRT(pose_ref);
-
     Eigen::Vector6d twist = Eigen::Vector6d::Zero();
-    buffer_reference_twist_.writeFromNonRT(twist);
+    invalidateExternalReference();
+    reference_buffer_.writeFromNonRT(CartesianReference{pose_ref, twist, getBaseLink(), externalReferenceGeneration()});
 
     // Refresh marker UI without altering reference
     clearMarker();

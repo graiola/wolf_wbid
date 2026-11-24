@@ -4,6 +4,7 @@
  */
 
 #include <wolf_wbid/ros2/postural.h>
+#include <wolf_wbid/core/quadruped_robot.h>
 #include <wolf_controller_utils/ros2_param_getter.h>
 
 #include <cmath>
@@ -20,6 +21,26 @@ PosturalImpl::PosturalImpl(const std::string& robot_name,
   , TaskRosHandler<wolf_msgs::msg::PosturalTask>(task_id, robot_name, period)
 {
   const std::size_t n = static_cast<std::size_t>(taskSize());
+  reference_positions_.setZero(n);
+  reference_velocities_.setZero(n);
+  for (const auto& name : jointNames()) {
+    const auto index = robot.getJointIndex(name);
+    if (index < FLOATING_BASE_DOFS || index >= taskSize())
+      throw std::invalid_argument("Postural reference joint is absent from the model: " + name);
+    reference_joint_indices_.push_back(static_cast<std::size_t>(index));
+  }
+  for (const auto& leg : robot.getLegNames()) {
+    for (const auto index : robot.getLimbJointsIds(leg)) {
+      const auto found = std::find(reference_joint_indices_.begin(), reference_joint_indices_.end(), index);
+      if (found == reference_joint_indices_.end())
+        throw std::invalid_argument("Postural leg joint is absent from the task model");
+      leg_reference_indices_.push_back(static_cast<std::size_t>(found - reference_joint_indices_.begin()));
+    }
+  }
+  reference_buffer_.initRT(NamedJointReference{});
+  reference_sub_ = task_nh_->create_subscription<wolf_msgs::msg::Postural>(
+      "reference/" + task_id, 1,
+      std::bind(&PosturalImpl::referenceCallback, this, std::placeholders::_1));
   buffer_lambda1_ = getLambda1();
   buffer_lambda2_ = getLambda2();
   buffer_weight_diag_ = getWeightDiag();
@@ -109,6 +130,48 @@ void PosturalImpl::applyExternalKnobs()
 
 void PosturalImpl::applyExternalReference()
 {
+  if (!OPTIONS.set_ext_reference)
+    return;
+  const auto* reference = reference_buffer_.readFromRT();
+  if (!reference->valid || reference->generation != externalReferenceGeneration())
+    return;
+
+  // The core task includes floating-base rows; received names identify actuated
+  // joints only. Preserve unnamed arm joints and the current base reference.
+  reference_positions_ = refQ();
+  reference_velocities_ = refQdotCached();
+  for (std::size_t i = 0; i < reference->indices.size(); ++i) {
+    const auto index = reference_joint_indices_[reference->indices[i]];
+    reference_positions_(index) = reference->positions[i];
+    reference_velocities_(index) = reference->velocities[i];
+  }
+  PosturalTask::setReference(reference_positions_, reference_velocities_);
+}
+
+void PosturalImpl::referenceCallback(const wolf_msgs::msg::Postural::SharedPtr msg)
+{
+  const auto generation = externalReferenceGeneration();
+  NamedJointReference reference;
+  if (!resolveNamedJointReference(jointNames(), msg->name, msg->positions,
+                                 msg->velocities, reference)) {
+    RCLCPP_WARN_THROTTLE(task_nh_->get_logger(), *task_nh_->get_clock(), 2000,
+                        "Rejected invalid named postural reference");
+    return;
+  }
+  reference.generation = generation;
+  const bool complete_legs = coversRequiredJoints(reference, leg_reference_indices_);
+  if (OPTIONS.mpc_reference_mode && !complete_legs) {
+    RCLCPP_WARN_THROTTLE(task_nh_->get_logger(), *task_nh_->get_clock(), 2000,
+                        "MPC postural references must include every leg joint");
+    return;
+  }
+  if (!complete_legs) {
+    invalidateExternalReference();
+    reference.generation = externalReferenceGeneration();
+  }
+  reference_buffer_.writeFromNonRT(reference);
+  if (complete_legs)
+    markExternalReferenceReceived(reference.generation);
 }
 
 void PosturalImpl::updateCost(const Eigen::VectorXd& x)
@@ -159,6 +222,11 @@ void PosturalImpl::publish()
 
 bool PosturalImpl::reset()
 {
+  // Invalidate in-flight callbacks without writing the non-RT buffer from the
+  // control thread. The next valid message starts a new reference generation.
+  if (!OPTIONS.mpc_reference_mode) {
+    invalidateExternalReference();
+  }
   const bool ok = PosturalTask::reset();
 
   buffer_lambda1_ = getLambda1();

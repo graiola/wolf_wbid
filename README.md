@@ -2,6 +2,9 @@
 
 Whole-body inverse dynamics package in WoLF for quadruped control.
 
+For the embedded MPC integration, see
+[ROS 2 external references](docs/external_mpc_references.md).
+
 It provides:
 - inverse-dynamics problem setup (`id_problem`)
 - task/constraint building blocks (Cartesian, CoM, momentum, postural, wrench)

@@ -53,6 +53,8 @@ public:
             const double& period = 0.001,
             const bool& use_mesh = true);
 
+  ~CartesianImpl() override { stopSpinner(); }
+
   virtual void registerReconfigurableVariables() override;
 
   void activateRuntimeInterfaces() override { TaskRosHandler<wolf_msgs::msg::CartesianTask>::startSpinner(); }
@@ -187,10 +189,15 @@ private:
   CartesianTrajectory::Ptr trj_;
 
   /**
-   * @brief Realtime buffers for reference pose and twist
+   * @brief One snapshot per message; pose, twist and frame cannot mix samples.
    */
-  realtime_tools::RealtimeBuffer<Eigen::Affine3d> buffer_reference_pose_;
-  realtime_tools::RealtimeBuffer<Eigen::Vector6d> buffer_reference_twist_;
+  struct CartesianReference {
+    Eigen::Affine3d pose{Eigen::Affine3d::Identity()};
+    Eigen::Vector6d twist{Eigen::Vector6d::Zero()};
+    std::string frame;
+    std::uint64_t generation{0};
+  };
+  realtime_tools::RealtimeBuffer<CartesianReference> reference_buffer_;
 
 
   typename rclcpp::Subscription<wolf_msgs::msg::Cartesian>::SharedPtr reference_sub_;

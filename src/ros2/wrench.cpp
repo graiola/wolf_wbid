@@ -4,6 +4,7 @@
  */
 
 #include <wolf_wbid/ros2/wrench.h>
+#include <wolf_wbid/core/reference_validation.h>
 #include <wolf_controller_utils/ros2_param_getter.h>
 
 #include <cmath>
@@ -20,11 +21,11 @@ WrenchImpl::WrenchImpl(const std::string& robot_name,
   , TaskRosHandler<wolf_msgs::msg::WrenchTask>(task_id, robot_name, period)
   , vars_(vars)
 {
-  buffer_reference_force_.initRT(Eigen::Vector3d::Zero());
+  buffer_reference_force_.initRT(ForceReference{});
 
   reference_sub_ = task_nh_->create_subscription<wolf_msgs::msg::Wrench>(
       "reference/" + task_id,
-      1000,
+      1,
       std::bind(&WrenchImpl::referenceCallback, this, std::placeholders::_1));
 
   buffer_lambda1_ = this->getLambda1();
@@ -109,8 +110,11 @@ void WrenchImpl::applyExternalKnobs()
 
 void WrenchImpl::applyExternalReference()
 {
-  if(OPTIONS.set_ext_reference)
-    this->setReference(*buffer_reference_force_.readFromRT());
+  if (!OPTIONS.set_ext_reference)
+    return;
+  const auto* reference = buffer_reference_force_.readFromRT();
+  if (reference->generation == externalReferenceGeneration())
+    this->setReference(reference->force);
 }
 
 void WrenchImpl::updateCost(const Eigen::VectorXd& x)
@@ -169,7 +173,9 @@ void WrenchImpl::publish()
 bool WrenchImpl::reset()
 {
   this->WrenchTask::reset();
-  buffer_reference_force_.initRT(Eigen::Vector3d::Zero());
+  if (!OPTIONS.mpc_reference_mode) {
+    invalidateExternalReference();
+  }
   has_last_f_act_ = false;
   last_f_act_.setZero();
 
@@ -180,12 +186,27 @@ bool WrenchImpl::reset()
 
 void WrenchImpl::referenceCallback(const wolf_msgs::msg::Wrench::SharedPtr msg)
 {
+  auto generation = externalReferenceGeneration();
   Eigen::Vector3d f = Eigen::Vector3d::Zero();
   f.x() = msg->wrench.force.x;
   f.y() = msg->wrench.force.y;
   f.z() = msg->wrench.force.z;
 
-  buffer_reference_force_.writeFromNonRT(f);
+  // This task is a world-frame point force. No TF conversion is performed.
+  const Eigen::Vector3d torque(msg->wrench.torque.x, msg->wrench.torque.y, msg->wrench.torque.z);
+  if (!validPointForceReference(f, torque, msg->header.frame_id)) {
+    RCLCPP_WARN_THROTTLE(task_nh_->get_logger(), *task_nh_->get_clock(), 2000,
+                        "Rejected non-finite or non-world wrench reference");
+    return;
+  }
+
+  if (msg->header.frame_id.empty()) {
+    invalidateExternalReference();
+    generation = externalReferenceGeneration();
+  }
+  buffer_reference_force_.writeFromNonRT(ForceReference{f, generation});
+  if (msg->header.frame_id == WORLD_FRAME_NAME)
+    markExternalReferenceReceived(generation);
   last_time_ = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9;
 }
 

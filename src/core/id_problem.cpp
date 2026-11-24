@@ -313,6 +313,53 @@ void IDProblem::setControlMode(mode_t mode)
   }
 }
 
+void IDProblem::setPlannedContactStates(const std::array<bool, N_LEGS>& states)
+{
+  planned_contact_states_ = states;
+  if (has_planned_contact_states_)
+    return;
+  has_planned_contact_states_ = true;
+  for (const auto& name : foot_names_) {
+    feet_.at(name)->OPTIONS.mpc_reference_mode = true;
+    wrenches_.at(name)->OPTIONS.mpc_reference_mode = true;
+  }
+  waist_->OPTIONS.mpc_reference_mode = true;
+  postural_->OPTIONS.mpc_reference_mode = true;
+}
+
+void IDProblem::clearPlannedContactStates()
+{
+  if (!has_planned_contact_states_)
+    return;
+  has_planned_contact_states_ = false;
+  for (const auto& name : foot_names_) {
+    feet_.at(name)->OPTIONS.mpc_reference_mode = false;
+    wrenches_.at(name)->OPTIONS.mpc_reference_mode = false;
+  }
+  waist_->OPTIONS.mpc_reference_mode = false;
+  postural_->OPTIONS.mpc_reference_mode = false;
+}
+
+bool IDProblem::isContactEnabled(const std::string& foot_name) const
+{
+  return contact_enabled_.at(foot_name);
+}
+
+bool IDProblem::externalMpcReferencesReady(double max_age_seconds) const
+{
+  if (!initialized_.load() || !std::isfinite(max_age_seconds) || max_age_seconds <= 0.0 ||
+      max_age_seconds >= static_cast<double>(std::numeric_limits<std::int64_t>::max()) / 1e9)
+    return false;
+  const auto max_age = static_cast<std::int64_t>(max_age_seconds * 1e9);
+  for (const auto& name : foot_names_) {
+    if (!feet_.at(name)->hasFreshExternalReference(max_age) ||
+        !wrenches_.at(name)->hasFreshExternalReference(max_age))
+      return false;
+  }
+  return waist_->hasFreshExternalReference(max_age) &&
+         postural_->hasFreshExternalReference(max_age);
+}
+
 void IDProblem::setSolver(std::unique_ptr<IQPSolver> solver)
 {
   if(!solver) {
@@ -505,23 +552,6 @@ void IDProblem::update()
   wrench_lower_lims_(1) = y_force_lower_lim_;
   wrench_lower_lims_(2) = z_force_lower_lim_;
 
-  // Update constraints params
-  for(const auto& fn : foot_names_) {
-    if(friction_cones_.count(fn)) {
-      friction_cones_.at(fn)->setContactRotation(fc_R_);
-      friction_cones_.at(fn)->setMu(mu_);
-      friction_cones_.at(fn)->setEnabled(contact_enabled_[fn]);
-    }
-    if(force_bounds_.count(fn)) {
-      Eigen::Vector3d fmin(x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_);
-      Eigen::Vector3d fmax = wrench_upper_lims_.head<3>();
-      force_bounds_.at(fn)->setMin(fmin);
-      force_bounds_.at(fn)->setMax(fmax);
-      force_bounds_.at(fn)->releaseContact(!contact_enabled_[fn]);
-      force_bounds_.at(fn)->setEnabled(true);
-    }
-  }
-
   // Mode switch logic
   if(change_control_mode_) {
     if(control_mode_ == EXT) {
@@ -534,7 +564,7 @@ void IDProblem::update()
           wrenches_[fn]->setWeight(2.0);
         }
         feet_[fn]->setLambda(1., 1.);
-        // Keep all contacts enabled in EXT (legacy behavior: no swing/stance gating from planner)
+        // A planned contact schedule, when present, is applied below.
         contact_enabled_[fn] = true;
         if(dynamics_eq_) dynamics_eq_->enableContact(fn);
       }
@@ -564,6 +594,41 @@ void IDProblem::update()
 
       reset();
       activateExternalReferences(false);
+    }
+  }
+
+  // Apply the evaluated MPC contact schedule before assembling constraints.
+  // Legacy EXT users without this stream retain their existing contact setup.
+  if (control_mode_ == EXT && has_planned_contact_states_) {
+    for (std::size_t i = 0; i < foot_names_.size(); ++i) {
+      const auto& name = foot_names_[i];
+      const bool enabled = planned_contact_states_[i];
+      contact_enabled_[name] = enabled;
+      if (torque_limits_) {
+        if (enabled) torque_limits_->enableContact(name);
+        else torque_limits_->disableContact(name);
+      }
+      if (dynamics_eq_) {
+        if (enabled) dynamics_eq_->enableContact(name);
+        else dynamics_eq_->disableContact(name);
+      }
+    }
+  }
+
+  // Update constraints params
+  for(const auto& fn : foot_names_) {
+    if(friction_cones_.count(fn)) {
+      friction_cones_.at(fn)->setContactRotation(fc_R_);
+      friction_cones_.at(fn)->setMu(mu_);
+      friction_cones_.at(fn)->setEnabled(contact_enabled_[fn]);
+    }
+    if(force_bounds_.count(fn)) {
+      Eigen::Vector3d fmin(x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_);
+      Eigen::Vector3d fmax = wrench_upper_lims_.head<3>();
+      force_bounds_.at(fn)->setMin(fmin);
+      force_bounds_.at(fn)->setMax(fmax);
+      force_bounds_.at(fn)->releaseContact(!contact_enabled_[fn]);
+      force_bounds_.at(fn)->setEnabled(true);
     }
   }
 

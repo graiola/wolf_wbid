@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.5)
 project(wolf_wbid)
 
+if(BUILD_TESTING)
+    enable_testing()
+    add_executable(named_joint_reference_test test/named_joint_reference_test.cpp)
+    target_include_directories(named_joint_reference_test PRIVATE include)
+    target_compile_features(named_joint_reference_test PRIVATE cxx_std_17)
+    add_test(NAME named_joint_reference_test COMMAND named_joint_reference_test)
+endif()
+
 option(WOLF_WBID_ENABLE_EIQUADPROG "Build with eiQuadProg (GPL)" OFF)
 
 include(CheckCXXCompilerFlag)
@@ -21,6 +29,15 @@ else()
 endif()
 
 find_package(Eigen3 REQUIRED)
+# Eigen's CMake package exports its include path through the imported target.
+# Keep the vendored RBDL build and standalone checks independent of /opt/ros.
+get_target_property(EIGEN3_INCLUDE_DIRS Eigen3::Eigen INTERFACE_INCLUDE_DIRECTORIES)
+if(BUILD_TESTING)
+    add_executable(reference_readiness_test test/reference_readiness_test.cpp)
+    target_include_directories(reference_readiness_test PRIVATE include ${EIGEN3_INCLUDE_DIRS})
+    target_compile_features(reference_readiness_test PRIVATE cxx_std_17)
+    add_test(NAME reference_readiness_test COMMAND reference_readiness_test)
+endif()
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_eigen REQUIRED)
@@ -143,19 +160,20 @@ add_library(task_wrappers SHARED
     src/${TASK_WRAPPERS_FOLDER}/postural.cpp
     src/${TASK_WRAPPERS_FOLDER}/wrench.cpp
     )
-target_link_libraries(task_wrappers 
-    cartesian_trajectory 
-    quadruped_robot
-    ${tf2_LIBRARIES}
-    ${tf2_ros_LIBRARIES}
-    ${tf2_eigen_LIBRARIES}
-    ${realtime_tools_LIBRARIES}
-    ${wolf_controller_utils_LIBRARIES}
-    ${wolf_msgs_LIBRARIES}
-    ${interactive_markers_LIBRARIES}
-    interactive_markers # FIX FOR ROS HUMBLE
-    realtime_tools # FIX FOR ROS HUMBLE
-    )
+target_link_libraries(task_wrappers cartesian_trajectory quadruped_robot)
+if(ament_cmake_FOUND AND NOT catkin_FOUND)
+    ament_target_dependencies(task_wrappers
+        tf2 tf2_ros tf2_eigen realtime_tools wolf_controller_utils wolf_msgs interactive_markers)
+else()
+    target_link_libraries(task_wrappers
+        ${tf2_LIBRARIES}
+        ${tf2_ros_LIBRARIES}
+        ${tf2_eigen_LIBRARIES}
+        ${realtime_tools_LIBRARIES}
+        ${wolf_controller_utils_LIBRARIES}
+        ${wolf_msgs_LIBRARIES}
+        ${interactive_markers_LIBRARIES})
+endif()
 
 add_library(id_problem SHARED 
     src/core/id_problem.cpp

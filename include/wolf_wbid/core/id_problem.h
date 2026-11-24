@@ -18,6 +18,7 @@
 
 // STD
 #include <atomic>
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
@@ -127,6 +128,13 @@ public:
   /** @brief Sets the active control mode. */
   void setControlMode(mode_t mode);
 
+  // Control-thread API. Entries follow getFootNames(), independent of MPC mode bits.
+  void setPlannedContactStates(const std::array<bool, N_LEGS>& states);
+  void clearPlannedContactStates();
+  bool isContactEnabled(const std::string& foot_name) const;
+  // Thread-safe receipt checks for the MPC entry service and runtime watchdog.
+  bool externalMpcReferencesReady(double max_age_seconds) const;
+
   void setSolver(std::unique_ptr<IQPSolver> solver);
   bool setSolverByName(const std::string& name);
 
@@ -135,6 +143,9 @@ public:
 
 
 private:
+
+  std::array<bool, N_LEGS> planned_contact_states_{};
+  bool has_planned_contact_states_{false};
 
   bool debug_enabled_{false};
   uint32_t debug_mask_{DBG_ALL};
@@ -231,7 +242,7 @@ private:
 
   // flags
   std::atomic<unsigned int> control_mode_{WPG};
-  bool initialized_{false};
+  std::atomic<bool> initialized_{false};
 
   bool activate_com_z_{true};
   bool activate_angular_momentum_{true};

@@ -21,6 +21,7 @@ WoLF: Whole-body Locomotion Framework for quadruped robots (c) by Gennaro Raiola
 
 // WoLF utils
 #include <wolf_controller_utils/common.h>
+#include <wolf_wbid/core/reference_freshness.h>
 
 // Forward declarations
 namespace wolf_wbid {
@@ -55,6 +56,7 @@ public:
     std::atomic<bool> set_ext_weight    = true;
     std::atomic<bool> set_ext_gains     = true;
     std::atomic<bool> set_ext_reference = false;
+    std::atomic<bool> mpc_reference_mode = false;
   } OPTIONS;
 
   TaskWrapperInterface(const std::string& task_name,
@@ -79,6 +81,10 @@ public:
   /** @brief Updates task cost diagnostics from the current solution. */
   virtual void updateCost(const Eigen::VectorXd& x) = 0;
 
+  bool hasFreshExternalReference(std::int64_t max_age) const {
+    return reference_freshness_.fresh(max_age);
+  }
+
   // Dynamic parameter callbacks. They only write thread-safe buffers.
   void setLambda1(double value);
   void setLambda2(double value);
@@ -99,6 +105,11 @@ public:
   void setKdYaw(double value);
 
 protected:
+  std::uint64_t externalReferenceGeneration() const { return reference_freshness_.generation(); }
+  void markExternalReferenceReceived(std::uint64_t generation) { reference_freshness_.received(generation); }
+  void invalidateExternalReference() { reference_freshness_.invalidate(); }
+  ReferenceFreshness reference_freshness_;
+
   // Hooks called by update()
   // Default: no-op. Concrete wrappers (ROS handlers) override what they need.
   virtual void applyExternalKnobs() {}

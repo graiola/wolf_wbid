@@ -34,6 +34,8 @@ public:
              const IDVariables& vars,
              const double& period = 0.001);
 
+  ~WrenchImpl() override { stopSpinner(); }
+
   virtual void registerReconfigurableVariables() override;
 
   void activateRuntimeInterfaces() override { TaskRosHandler<wolf_msgs::msg::WrenchTask>::startSpinner(); }
@@ -55,7 +57,11 @@ private:
   void referenceCallback(const wolf_msgs::msg::Wrench::SharedPtr msg);
 
   const IDVariables& vars_;
-  realtime_tools::RealtimeBuffer<Eigen::Vector3d> buffer_reference_force_;
+  struct ForceReference {
+    Eigen::Vector3d force{Eigen::Vector3d::Zero()};
+    std::uint64_t generation{0};
+  };
+  realtime_tools::RealtimeBuffer<ForceReference> buffer_reference_force_;
   Eigen::Vector3d last_f_act_{Eigen::Vector3d::Zero()};
   bool has_last_f_act_{false};
 
