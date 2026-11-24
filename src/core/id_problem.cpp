@@ -221,7 +221,8 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     constraints_ext_.push_back(fc);
   }
 
-  // Force bounds (WPG only)
+  // WPG uses configured force bounds. EXT uses these objects only to zero
+  // released contacts; stance forces retain the existing EXT constraints.
   force_bounds_.clear();
   for(const auto& fn : foot_names_) {
     Eigen::Vector3d fmin(x_force_lower_lim_, y_force_lower_lim_, z_force_lower_lim_);
@@ -229,6 +230,7 @@ void IDProblem::init(const std::string& robot_name, const double& dt)
     auto cb = std::make_shared<ContactForceBoundsConstraint>(fn, *vars_, fmin, fmax);
     force_bounds_[fn] = cb;
     constraints_.push_back(cb);
+    constraints_ext_.push_back(cb);
   }
 
   // Torque limits (WPG only)
@@ -628,7 +630,7 @@ void IDProblem::update()
       force_bounds_.at(fn)->setMin(fmin);
       force_bounds_.at(fn)->setMax(fmax);
       force_bounds_.at(fn)->releaseContact(!contact_enabled_[fn]);
-      force_bounds_.at(fn)->setEnabled(true);
+      force_bounds_.at(fn)->setEnabled(control_mode_ == WPG || !contact_enabled_[fn]);
     }
   }
 

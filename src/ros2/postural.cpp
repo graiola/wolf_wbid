@@ -7,6 +7,8 @@
 #include <wolf_wbid/core/quadruped_robot.h>
 #include <wolf_controller_utils/ros2_param_getter.h>
 
+#include "postural_message.h"
+
 #include <cmath>
 #include <stdexcept>
 
@@ -187,34 +189,8 @@ void PosturalImpl::publish()
   msg.header.frame_id = "Joints";
   msg.header.stamp = task_nh_->now();
 
-  const auto& names = jointNames();
-  const auto& q = actualQ();
-  const auto& qdot = actualQdot();
-  const auto& qref = refQ();
-  const auto& qdref = refQdotCached();
-  const auto& e = posError();
-  const auto& edot = velError();
-
-  const std::size_t n = static_cast<std::size_t>(q.size());
-
-  msg.name.resize(n);
-  msg.position_actual.resize(n);
-  msg.position_reference.resize(n);
-  msg.velocity_actual.resize(n);
-  msg.velocity_reference.resize(n);
-  msg.position_error.resize(n);
-  msg.velocity_error.resize(n);
-
-  for(std::size_t i = 0; i < n; ++i)
-  {
-    msg.name[i] = (i < names.size()) ? names[i] : std::string("");
-    msg.position_actual[i] = q(i);
-    msg.position_reference[i] = qref(i);
-    msg.velocity_actual[i] = qdot(i);
-    msg.velocity_reference[i] = (qdref.size() == qdot.size()) ? qdref(i) : 0.0;
-    msg.position_error[i] = e(i);
-    msg.velocity_error[i] = edot(i);
-  }
+  detail::fillPosturalJointFields(msg, jointNames(), reference_joint_indices_,
+      actualQ(), actualQdot(), refQ(), refQdotCached(), posError(), velError());
 
   msg.cost = cost_;
   pub_->publish(std::move(msg));

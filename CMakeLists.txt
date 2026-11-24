@@ -164,6 +164,14 @@ target_link_libraries(task_wrappers cartesian_trajectory quadruped_robot)
 if(ament_cmake_FOUND AND NOT catkin_FOUND)
     ament_target_dependencies(task_wrappers
         tf2 tf2_ros tf2_eigen realtime_tools wolf_controller_utils wolf_msgs interactive_markers)
+    if(BUILD_TESTING)
+        add_executable(postural_telemetry_test test/postural_telemetry_test.cpp)
+        target_include_directories(postural_telemetry_test PRIVATE src/ros2)
+        target_compile_features(postural_telemetry_test PRIVATE cxx_std_17)
+        target_link_libraries(postural_telemetry_test Eigen3::Eigen)
+        ament_target_dependencies(postural_telemetry_test wolf_msgs)
+        add_test(NAME postural_telemetry_test COMMAND postural_telemetry_test)
+    endif()
 else()
     target_link_libraries(task_wrappers
         ${tf2_LIBRARIES}
